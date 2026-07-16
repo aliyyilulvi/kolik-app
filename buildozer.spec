@@ -18,7 +18,7 @@ version = 1.0.0
 # NOT: numpy KASITLI OLARAK YOK - Android için cross-compile edilirken sık
 # hata veriyor (bkz. analyzer.py başındaki not). Analiz motoru saf Python'dur.
 requirements = python3,kivy==2.2.1,cython==3.0.11,requests,certifi,urllib3,chardet,idna
-p4a.branch = 2024.1.21
+p4a.branch = v2024.01.21
 
 # Uygulama ikonu / splash (opsiyonel - kendi görsellerinizi ekleyin)
 # icon.filename = %(source.dir)s/data/icon.png
