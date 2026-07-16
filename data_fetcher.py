@@ -24,6 +24,13 @@ API anahtarınızı environment variable olarak ayarlayın:
 import os
 import csv
 import requests
+import socket
+import urllib3.util.connection as _urllib3_cn
+
+def _allowed_gai_family():
+    return socket.AF_INET
+
+_urllib3_cn.allowed_gai_family = _allowed_gai_family
 from datetime import datetime
 from typing import List, Optional
 
