@@ -2,14 +2,16 @@ name: Kolik APK Derle
 
 # Bu dosya, projeye her değişiklik yüklendiğinde (push) veya elle
 # tetiklendiğinde GitHub'ın kendi sunucularında otomatik olarak
-# Android APK derlemesi yapar. Colab'daki gibi Python sürüm/venv
-# sorunları yaşanmaz çünkü bu, topluluğun kararlı, hazır Docker
-# imajını kullanan resmi bir buildozer-action'dır.
+# Android APK derlemesi yapar. Adımlar elle (hazır bir eklenti
+# kullanmadan) yazılmıştır; böylece her aşama şeffaf ve hata ayıklaması
+# kolaydır. Python 3.11 kullanılır çünkü buildozer'ın gerektirdiği
+# eski Cython bileşenleri, Python 3.12+ sürümlerinde kaldırılan 'cgi'
+# modülüne bağımlıdır.
 
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch:   # "Actions" sekmesinden elle "Run workflow" ile de tetiklenebilir
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,15 +20,29 @@ jobs:
       - name: Kodu indir
         uses: actions/checkout@v4
 
-      - name: APK'yı derle (Buildozer)
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
+      - name: Python 3.11 kur
+        uses: actions/setup-python@v5
         with:
-          command: buildozer android debug
-          buildozer_version: stable
+          python-version: '3.11'
+
+      - name: Sistem bağımlılıklarını kur
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq git zip unzip openjdk-17-jdk autoconf libtool \
+            pkg-config zlib1g-dev libncurses-dev cmake libffi-dev libssl-dev \
+            automake build-essential
+
+      - name: Buildozer ve Cython kur
+        run: |
+          pip install --upgrade pip
+          pip install buildozer cython
+
+      - name: APK'yı derle
+        run: |
+          yes | buildozer -v android debug
 
       - name: APK'yı yükle (indirilebilir çıktı olarak)
         uses: actions/upload-artifact@v4
         with:
           name: kolik-apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
