@@ -39,6 +39,8 @@ jobs:
       
       - name: APK'yı derle
         run: |
+          echo "cython>=0.29.36" > /tmp/pip-constraints.txt
+          export PIP_CONSTRAINT=/tmp/pip-constraints.txt
           yes | buildozer -v android debug
 
       - name: APK'yı yükle (indirilebilir çıktı olarak)
