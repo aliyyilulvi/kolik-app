@@ -56,7 +56,10 @@ class BultenScreen(Screen):
             fixtures = data_fetcher.fetch_upcoming_fixtures(league_code, limit=20)
             self._on_fixtures_loaded(fixtures)
         except Exception as e:
-            self._on_error(str(e))
+        import traceback
+        from kivy.logger import Logger
+        Logger.error("KOLIK: TAM HATA:\n" + traceback.format_exc())
+        self._on_error(str(e))
 
     @mainthread
     def _on_fixtures_loaded(self, fixtures):
@@ -106,7 +109,10 @@ class AnalizScreen(Screen):
             result = analyze_fixture(fixture)
             self._on_analysis_done(result)
         except Exception as e:
-            self._on_error(str(e))
+        import traceback
+        from kivy.logger import Logger
+        Logger.error("KOLIK: TAM HATA:\n" + traceback.format_exc())
+        self._on_error(str(e))
 
     @mainthread
     def _on_analysis_done(self, result):
