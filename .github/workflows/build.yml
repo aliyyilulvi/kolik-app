@@ -36,8 +36,8 @@ jobs:
         run: |
           python3.11 -m pip install --upgrade pip
           python3.11 -m pip install buildozer cython
-
-     - name: APK'yı derle
+      
+      - name: APK'yı derle
         run: |
           export PATH="$(dirname $(which python3.11)):$PATH"
           yes | buildozer -v android debug
