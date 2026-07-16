@@ -35,11 +35,10 @@ jobs:
       - name: Buildozer ve Cython kur
         run: |
           python3.11 -m pip install --upgrade pip
-          python3.11 -m pip install buildozer cython
+          python3.11 -m pip install buildozer cython "python-for-android==2024.1.21"
       
       - name: APK'yı derle
         run: |
-          export PATH="$(dirname $(which python3.11)):$PATH"
           yes | buildozer -v android debug
 
       - name: APK'yı yükle (indirilebilir çıktı olarak)
