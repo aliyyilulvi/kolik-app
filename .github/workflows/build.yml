@@ -34,12 +34,12 @@ jobs:
 
       - name: Buildozer ve Cython kur
         run: |
-          pip install --upgrade pip
-          pip install buildozer cython
+          python3.11 -m pip install --upgrade pip
+          python3.11 -m pip install buildozer cython
 
       - name: APK'yı derle
         run: |
-          yes | buildozer -v android debug
+          yes | python3.11 -m buildozer -v android debug
 
       - name: APK'yı yükle (indirilebilir çıktı olarak)
         uses: actions/upload-artifact@v4
