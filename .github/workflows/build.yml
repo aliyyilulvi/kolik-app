@@ -1,0 +1,32 @@
+name: Kolik APK Derle
+
+# Bu dosya, projeye her değişiklik yüklendiğinde (push) veya elle
+# tetiklendiğinde GitHub'ın kendi sunucularında otomatik olarak
+# Android APK derlemesi yapar. Colab'daki gibi Python sürüm/venv
+# sorunları yaşanmaz çünkü bu, topluluğun kararlı, hazır Docker
+# imajını kullanan resmi bir buildozer-action'dır.
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:   # "Actions" sekmesinden elle "Run workflow" ile de tetiklenebilir
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v4
+
+      - name: APK'yı derle (Buildozer)
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          command: buildozer android debug
+          buildozer_version: stable
+
+      - name: APK'yı yükle (indirilebilir çıktı olarak)
+        uses: actions/upload-artifact@v4
+        with:
+          name: kolik-apk
+          path: ${{ steps.buildozer.outputs.filename }}
