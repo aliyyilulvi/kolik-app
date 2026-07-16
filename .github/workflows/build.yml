@@ -24,7 +24,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
+      - name: Python3 varsayılanını sabitle
+        run: |
+          sudo ln -sf $(which python3.11) /usr/bin/python3
+          python3 --version
       - name: Sistem bağımlılıklarını kur
         run: |
           sudo apt-get update -qq
