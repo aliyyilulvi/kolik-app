@@ -18,7 +18,10 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Kodu indir
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 
+      - name: API anahtarını göm
+        run: |
+          sed -i "s/FOOTBALL_DATA_API_KEY\", \"\"/FOOTBALL_DATA_API_KEY\", \"${{ secrets.FOOTBALL_DATA_API_KEY }}\"/" data_fetcher.py
 
       - name: Python 3.11 kur
         uses: actions/setup-python@v5
