@@ -16,10 +16,9 @@ version = 1.0.0
 # Bağımlılıklar (requirements.txt ile senkron tutulmalı)
 # NOT: numpy KASITLI OLARAK YOK - Android için cross-compile edilirken sık
 # hata veriyor (bkz. analyzer.py başındaki not). Analiz motoru saf Python'dur.
-requirements = python3,kivy==2.2.1,cython==3.0.11,requests,certifi,urllib3,chardet,idna
-
-# p4a.branch = v2024.01.21  # KALDIRILDI: bu sürümde "-luuid" linker hatası vardı (NDK 25b + Python 3.11 uuid modülü).
-# Belirtilmediğinde buildozer, p4a'nın güncel/stable sürümünü kullanır ve bu hata giderilmiş oluyor.
+# NOT: cython sürümü SABİTLENMEDİ - eski cython==3.0.11, Python 3.14'te
+# kaldırılan "cgi" modülünü kullandığı için build ortamıyla uyumsuzdu.
+requirements = python3,kivy==2.2.1,cython,requests,certifi,urllib3,chardet,idna
 
 # Uygulama ikonu / splash (opsiyonel - kendi görsellerinizi ekleyin)
 # icon.filename = %(source.dir)s/data/icon.png
