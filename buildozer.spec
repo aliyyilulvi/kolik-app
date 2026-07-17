@@ -13,18 +13,13 @@ source.include_exts = py,kv,csv,png,jpg,ttf,atlas
 # Sürüm
 version = 1.0.0
 
-# Bağımlılıklar (requirements.txt ile senkron tutulmalı)
-# NOT: numpy KASITLI OLARAK YOK - Android için cross-compile edilirken sık
-# hata veriyor. Analiz motoru saf Python'dur.
-# NOT: pyjnius EKLENDİ - data_fetcher.py'deki Android native DNS
-# çözümleme fallback'i için garanti altına alındı.
+# Bağımlılıklar
 requirements = python3,kivy==2.3.1,requests,certifi,urllib3,chardet,idna,pyjnius
 
-# python-for-android dalı SABİTLENDİ: "master" Python 3.12'ye kadar kararlı
-# test edilmiş durumda.
+# python-for-android dalı SABİTLENDİ: "master" Python 3.12'ye kadar kararlı.
 p4a.branch = master
 
-# Uygulama ikonu / splash (opsiyonel - kendi görsellerinizi ekleyin)
+# Uygulama ikonu / splash (opsiyonel)
 # icon.filename = %(source.dir)s/data/icon.png
 # presplash.filename = %(source.dir)s/data/presplash.png
 
@@ -36,9 +31,10 @@ fullscreen = 0
 
 # ---------------------------------------------------------------------
 # ANDROID AYARLARI
+# ÖNEMLİ: Bu ayarlar [app] bölümünün İÇİNDE olmalı, ayrı bir
+# [app:android] bölümünde DEĞİL - aksi halde buildozer bunları
+# tanımıyor ve sessizce YOK SAYIYOR (izinler dahil!).
 # ---------------------------------------------------------------------
-
-[app:android]
 
 # İnternet izni ZORUNLU: API'lerden veri çekmek için
 android.permissions = INTERNET,ACCESS_NETWORK_STATE
@@ -55,23 +51,19 @@ android.archs = arm64-v8a, armeabi-v7a
 # Android Gradle dependency'lerini otomatik kabul et
 android.accept_sdk_license = True
 
-# APK mi AAB mi (Play Store için release'de aab tercih edilir)
+# APK mi AAB mi
 android.release_artifact = apk
 
 [buildozer]
 
-# Log seviyesi: 0 = az, 1 = normal, 2 = ayrıntılı (hata ayıklarken 2 önerilir)
+# Log seviyesi
 log_level = 2
 
 # Root olarak build uyarısını kapat (CI ortamlarında gerekebilir)
 warn_on_root = 1
 
 # ---------------------------------------------------------------------
-# DERLEME KOMUTU (bilgi amaçlı - terminalde çalıştırılır):
-#
+# DERLEME KOMUTU (bilgi amaçlı):
 #   pip install buildozer cython
 #   buildozer -v android debug
-#
-# İlk derleme Android SDK/NDK indireceği için uzun sürebilir (30-60 dk).
-# Derleme sonunda APK dosyası ./bin/ klasöründe oluşur.
 # ---------------------------------------------------------------------
