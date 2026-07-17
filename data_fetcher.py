@@ -9,28 +9,26 @@ Bu modül KESİNLİKLE bahis sitelerinden (Nesine, Misli, Bilyoner vb.) veri
 scrape etmez. Bunun yerine:
 
   1) Fikstür + geçmiş maç sonuçları  -> football-data.org REST API'si
-     (ücretsiz katmanı var, kişisel API anahtarı gerektirir, ToS'a uygundur)
-  2) Hava durumu                     -> Open-Meteo API (anahtar gerekmez, açık veri)
-  3) Kadro piyasa değeri             -> Transfermarkt'ın resmi bir API'si yoktur ve
-     sitesini scrape etmek ToS ihlalidir. Bu yüzden kullanıcı bu veriyi
-     data/market_values.csv dosyasına KENDİSİ girer (manuel/opsiyonel).
-     Girilmezse analiz motoru bu faktörü nötr (1.0) kabul eder.
+  2) Hava durumu                     -> Open-Meteo API (anahtar gerekmez)
+  3) Kadro piyasa değeri             -> data/market_values.csv (manuel, opsiyonel)
 
 API ANAHTARI:
-Mobilde (Android) ortam değişkeni ayarlamak mümkün olmadığı için API
-anahtarı doğrudan aşağıdaki _HARDCODED_API_KEY sabitine gömülüdür.
+Mobilde ortam değişkeni çalışmadığı için _HARDCODED_API_KEY'e gömülüdür.
 
-AĞ / DNS NOTU (ÖNEMLİ):
-Bu Android derlemesinde Python'un yerleşik socket.getaddrinfo() (isim
-çözümleme) fonksiyonu tamamen bozuk çalışıyor - sabit bir IP adresine
-bile bağlanamıyor. Bunu aşmak için önce Android'in KENDİ, çalışan Java
-DNS çözümleyicisini (java.net.InetAddress, pyjnius köprüsüyle) deniyoruz;
-o da olmazsa Cloudflare DNS-over-HTTPS'e (1.1.1.1) düşüyoruz.
+AĞ / DNS NOTU:
+Bu cihazda Python'un native DNS çözümleyicisi bozuk. Sırasıyla 3 yedek
+yöntem deneniyor: (1) Android'in kendi Java DNS'i (pyjnius), (2) DNS
+sorgusunu TCP üzerinden (RFC1035) 8.8.8.8'e gönderme - raw UDP DEĞİL,
+normal TCP socket kullanır, bu yüzden Android'in UDP kısıtlamasına
+takılmaz, (3) Cloudflare DNS-over-HTTPS. Hepsi başarısız olursa hata
+mesajında HANGİ yöntemin neden başarısız olduğu gösterilir.
 """
 
 import os
 import csv
 import socket
+import struct
+import random
 from datetime import datetime
 from typing import List, Optional
 
@@ -46,25 +44,92 @@ def _allowed_gai_family():
 
 _urllib3_cn.allowed_gai_family = _allowed_gai_family
 
+_last_dns_debug = []
+
 
 def _resolve_via_android(hostname: str) -> list:
-    """
-    Android'in kendi Java DNS çözümleyicisini (java.net.InetAddress)
-    pyjnius üzerinden kullanır. Python'un native getaddrinfo()'sundan
-    tamamen bağımsızdır, bu yüzden onun bozuk olmasından etkilenmez.
-    Sadece gerçek Android cihazda çalışır (masaüstünde pyjnius yoktur).
-    """
+    """Android'in kendi Java DNS çözümleyicisini (pyjnius üzerinden) dener."""
     try:
         from jnius import autoclass
         InetAddress = autoclass("java.net.InetAddress")
         addresses = InetAddress.getAllByName(hostname)
         return [a.getHostAddress() for a in addresses]
-    except Exception:
+    except Exception as e:
+        _last_dns_debug.append(f"android: {type(e).__name__}: {e}")
+        return []
+
+
+def _build_dns_query(hostname: str) -> bytes:
+    transaction_id = random.randint(0, 65535)
+    header = struct.pack(">HHHHHH", transaction_id, 0x0100, 1, 0, 0, 0)
+    parts = hostname.split(".")
+    question = b"".join(struct.pack("B", len(p)) + p.encode() for p in parts) + b"\x00"
+    question += struct.pack(">HH", 1, 1)  # type=A, class=IN
+    return header + question
+
+
+def _parse_dns_response(data: bytes) -> list:
+    ancount = struct.unpack(">H", data[6:8])[0]
+    idx = 12
+    while data[idx] != 0:
+        idx += data[idx] + 1
+    idx += 5  # null byte + qtype(2) + qclass(2)
+
+    ips = []
+    for _ in range(ancount):
+        if data[idx] & 0xC0 == 0xC0:
+            idx += 2
+        else:
+            while data[idx] != 0:
+                idx += data[idx] + 1
+            idx += 1
+        rtype, rclass, ttl, rdlength = struct.unpack(">HHIH", data[idx:idx + 10])
+        idx += 10
+        if rtype == 1 and rdlength == 4:
+            ip = ".".join(str(b) for b in data[idx:idx + 4])
+            ips.append(ip)
+        idx += rdlength
+    return ips
+
+
+def _resolve_via_dns_tcp(hostname: str, dns_server: str = "8.8.8.8", port: int = 53, timeout: float = 6.0) -> list:
+    """
+    DNS sorgusunu NORMAL TCP socket ile yapar (raw UDP DEĞİL). HTTPS
+    bağlantılarımızda kullandığımızla AYNI socket türü (SOCK_STREAM),
+    bu yüzden Android'in UDP/raw socket kısıtlamasına takılmaz.
+    """
+    try:
+        query = _build_dns_query(hostname)
+        tcp_query = struct.pack(">H", len(query)) + query  # RFC1035: 2 byte uzunluk öneki
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        try:
+            sock.connect((dns_server, port))
+            sock.sendall(tcp_query)
+
+            length_bytes = sock.recv(2)
+            if len(length_bytes) < 2:
+                return []
+            resp_length = struct.unpack(">H", length_bytes)[0]
+
+            resp_data = b""
+            while len(resp_data) < resp_length:
+                chunk = sock.recv(resp_length - len(resp_data))
+                if not chunk:
+                    break
+                resp_data += chunk
+        finally:
+            sock.close()
+
+        return _parse_dns_response(resp_data)
+    except Exception as e:
+        _last_dns_debug.append(f"dns_tcp: {type(e).__name__}: {e}")
         return []
 
 
 def _resolve_via_doh(hostname: str, timeout: float = 6.0) -> list:
-    """Cloudflare DNS-over-HTTPS ile hostname çözümler (yedek yöntem)."""
+    """Cloudflare DNS-over-HTTPS ile hostname çözümler (üçüncü yedek)."""
     try:
         resp = requests.get(
             "https://1.1.1.1/dns-query",
@@ -76,24 +141,26 @@ def _resolve_via_doh(hostname: str, timeout: float = 6.0) -> list:
         data = resp.json()
         answers = data.get("Answer", [])
         return [a["data"] for a in answers if a.get("type") == 1]
-    except Exception:
+    except Exception as e:
+        _last_dns_debug.append(f"doh: {type(e).__name__}: {e}")
         return []
 
 
 def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     try:
         return _original_getaddrinfo(host, port, family, type, proto, flags)
-    except socket.gaierror:
-        pass
+    except socket.gaierror as e:
+        _last_dns_debug.append(f"original: {e}")
 
-    # 1) Önce Android'in kendi (çalışan) DNS çözümleyicisini dene
     ips = _resolve_via_android(host)
-    # 2) Olmazsa Cloudflare DoH'a düş
+    if not ips:
+        ips = _resolve_via_dns_tcp(host)
     if not ips:
         ips = _resolve_via_doh(host)
 
     if not ips:
-        raise socket.gaierror(f"'{host}' çözümlenemedi (tüm yöntemler başarısız)")
+        debug_info = " | ".join(_last_dns_debug[-4:])
+        raise socket.gaierror(f"'{host}' çözümlenemedi -> [{debug_info}]")
 
     return [
         (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))
@@ -109,7 +176,6 @@ FOOTBALL_DATA_BASE = "https://api.football-data.org/v4"
 OPEN_METEO_BASE = "https://api.open-meteo.com/v1/forecast"
 GEOCODE_BASE = "https://geocoding-api.open-meteo.com/v1/search"
 
-# Mobilde ortam değişkeni çalışmadığı için API anahtarı doğrudan buraya gömülüdür.
 _HARDCODED_API_KEY = "6fdc17feb0d5436782e4382f3a1daa86"
 
 
@@ -127,9 +193,6 @@ def _headers() -> dict:
     return {"X-Auth-Token": _api_key()}
 
 
-# ----------------------------------------------------------------------
-# 1) FİKSTÜR (Bülten) ÇEKME
-# ----------------------------------------------------------------------
 def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20) -> List[dict]:
     url = f"{FOOTBALL_DATA_BASE}/competitions/{competition_code}/matches"
     params = {"status": "SCHEDULED"}
@@ -150,9 +213,6 @@ def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20) -> Li
     return fixtures
 
 
-# ----------------------------------------------------------------------
-# 2) TAKIM FORMU (son 5 genel, son 3 ev/deplasman)
-# ----------------------------------------------------------------------
 def fetch_team_recent_matches(team_id: int, limit: int = 10) -> List[MatchResult]:
     url = f"{FOOTBALL_DATA_BASE}/teams/{team_id}/matches"
     params = {"status": "FINISHED", "limit": limit}
@@ -204,9 +264,6 @@ def fetch_head_to_head(match_id: int, limit: int = 5) -> HeadToHead:
     return HeadToHead(matches=matches)
 
 
-# ----------------------------------------------------------------------
-# 3) KADRO PİYASA DEĞERİ (manuel CSV - Transfermarkt scrape edilmez)
-# ----------------------------------------------------------------------
 _MARKET_VALUE_CSV = os.path.join(os.path.dirname(__file__), "data", "market_values.csv")
 
 
@@ -224,9 +281,6 @@ def load_market_value(team_name: str) -> float:
     return 0.0
 
 
-# ----------------------------------------------------------------------
-# 4) HAVA DURUMU (Open-Meteo - ücretsiz, anahtar gerektirmez)
-# ----------------------------------------------------------------------
 def fetch_city_coordinates(city_name: str) -> Optional[dict]:
     resp = requests.get(GEOCODE_BASE, params={"name": city_name, "count": 1}, timeout=10)
     resp.raise_for_status()
@@ -266,9 +320,6 @@ def fetch_weather(city_name: str, match_date: str) -> WeatherInfo:
         return WeatherInfo()
 
 
-# ----------------------------------------------------------------------
-# 5) TÜMÜNÜ BİRLEŞTİREN YÜKSEK SEVİYE FONKSİYON
-# ----------------------------------------------------------------------
 def build_fixture(raw_fixture: dict) -> Fixture:
     home_stats = build_team_stats(raw_fixture["home"], raw_fixture["home_id"])
     away_stats = build_team_stats(raw_fixture["away"], raw_fixture["away_id"])
