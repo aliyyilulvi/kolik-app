@@ -1,13 +1,6 @@
 #:kivy 2.2.1
 # ---------------------------------------------------------------------
-# kolik.kv
-# Kolik uygulamasının görsel teması: Koyu Zümrüt Yeşili + Altın Sarısı
-# Renk paleti:
-#   Arka plan (koyu zümrüt):  #0B3D2E  -> (0.043, 0.239, 0.180, 1)
-#   İkincil panel (zümrüt):   #10513C  -> (0.063, 0.318, 0.235, 1)
-#   Vurgu (altın sarısı):     #D4AF37  -> (0.831, 0.686, 0.216, 1)
-#   Koyu altın (buton hover): #B8912B  -> (0.722, 0.569, 0.169, 1)
-#   Metin (krem beyaz):       #F2EFE6  -> (0.949, 0.937, 0.902, 1)
+# kolik.kv - Koyu Zümrüt Yeşili + Altın Sarısı tema
 # ---------------------------------------------------------------------
 
 <MatchRow>:
@@ -97,8 +90,8 @@
 
             TextInput:
                 id: league_input
-                text: "PL"
-                hint_text: "Lig kodu (orn: PL, PD, SA, BL1)"
+                text: ""
+                hint_text: "Lig kodu (bos = tum ligler, orn: PL)"
                 multiline: False
                 background_color: 0.063, 0.318, 0.235, 1
                 foreground_color: 0.949, 0.937, 0.902, 1
@@ -113,7 +106,7 @@
                 background_color: 0.831, 0.686, 0.216, 1
                 color: 0.043, 0.239, 0.180, 1
                 bold: True
-                on_release: root.refresh_fixtures(league_input.text.strip() or "PL", date_spinner.text)
+                on_release: root.refresh_fixtures(league_input.text.strip(), date_spinner.text)
 
         BoxLayout:
             size_hint_y: None
@@ -132,8 +125,8 @@
 
             Spinner:
                 id: date_spinner
-                text: "Tum Yaklasanlar"
-                values: ["Tum Yaklasanlar", "Bugun", "Bu Hafta (7 gun)", "Bu Ay (30 gun)"]
+                text: "Bugun"
+                values: ["Bugun", "Bu Hafta (7 gun)", "Bu Ay (30 gun)", "Tum Yaklasanlar"]
                 background_normal: ""
                 background_color: 0.063, 0.318, 0.235, 1
                 color: 0.949, 0.937, 0.902, 1
