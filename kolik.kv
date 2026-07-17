@@ -13,7 +13,7 @@
 <MatchRow>:
     orientation: "horizontal"
     size_hint_y: None
-    height: dp(64)
+    height: dp(78)
     padding: dp(10)
     spacing: dp(8)
     canvas.before:
@@ -27,29 +27,36 @@
     BoxLayout:
         orientation: "vertical"
         Label:
-            text: root.home_team + "  vs  " + root.away_team
+            text: root.home_team + " vs " + root.away_team
             color: 0.949, 0.937, 0.902, 1
             bold: True
             halign: "left"
             valign: "middle"
-            text_size: self.size
+            text_size: self.width, None
+            shorten: True
+            shorten_from: "right"
+            max_lines: 2
+            font_size: "13sp"
         Label:
-            text: root.league + "   |   " + root.kickoff
+            text: root.league + "  |  " + root.kickoff
             color: 0.831, 0.686, 0.216, 0.85
-            font_size: "12sp"
+            font_size: "11sp"
             halign: "left"
             valign: "middle"
-            text_size: self.size
+            text_size: self.width, None
+            shorten: True
+            shorten_from: "right"
 
     Button:
         id: select_btn
         text: "Analiz Et"
         size_hint_x: None
-        width: dp(110)
+        width: dp(100)
         background_normal: ""
         background_color: 0.831, 0.686, 0.216, 1
         color: 0.043, 0.239, 0.180, 1
         bold: True
+        font_size: "12sp"
 
 
 <KolikScreenManager>:
@@ -106,7 +113,31 @@
                 background_color: 0.831, 0.686, 0.216, 1
                 color: 0.043, 0.239, 0.180, 1
                 bold: True
-                on_release: root.refresh_fixtures(league_input.text.strip() or "PL")
+                on_release: root.refresh_fixtures(league_input.text.strip() or "PL", date_spinner.text)
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(40)
+            spacing: dp(8)
+
+            Label:
+                text: "Tarih araligi:"
+                color: 0.949, 0.937, 0.902, 0.8
+                font_size: "12sp"
+                size_hint_x: None
+                width: dp(100)
+                halign: "left"
+                text_size: self.size
+                valign: "middle"
+
+            Spinner:
+                id: date_spinner
+                text: "Tum Yaklasanlar"
+                values: ["Tum Yaklasanlar", "Bugun", "Bu Hafta (7 gun)", "Bu Ay (30 gun)"]
+                background_normal: ""
+                background_color: 0.063, 0.318, 0.235, 1
+                color: 0.949, 0.937, 0.902, 1
+                font_size: "12sp"
 
         Label:
             text: root.status_text
@@ -166,11 +197,16 @@
                 color: 0.831, 0.686, 0.216, 1
                 on_release: app.root.current = "bulten"
 
-            Label:
-                text: root.home_team + "  vs  " + root.away_team
-                bold: True
-                color: 0.949, 0.937, 0.902, 1
-                font_size: "16sp"
+        Label:
+            text: root.home_team + "  vs  " + root.away_team
+            bold: True
+            color: 0.949, 0.937, 0.902, 1
+            font_size: "16sp"
+            size_hint_y: None
+            height: dp(50)
+            halign: "center"
+            valign: "middle"
+            text_size: self.width, None
 
         Label:
             text: root.status_text
