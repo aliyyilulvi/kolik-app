@@ -5,27 +5,21 @@ data_fetcher.py
 Kolik uygulamasının veri toplama katmanı.
 
 ÖNEMLİ TASARIM KARARI:
-Bu modül KESİNLİKLE bahis sitelerinden (Nesine, Misli, Bilyoner vb.) veri
-scrape etmez. Bunun yerine:
-
+Bu modül KESİNLİKLE bahis sitelerinden veri scrape etmez.
   1) Fikstür + geçmiş maç sonuçları  -> football-data.org REST API'si
   2) Hava durumu                     -> Open-Meteo API (anahtar gerekmez)
   3) Kadro piyasa değeri             -> data/market_values.csv (manuel, opsiyonel)
 
-API ANAHTARI:
-Mobilde ortam değişkeni çalışmadığı için _HARDCODED_API_KEY'e gömülüdür.
+API ANAHTARI: Mobilde ortam değişkeni çalışmadığı için _HARDCODED_API_KEY'e gömülüdür.
 
-AĞ / DNS NOTU:
-Sistem DNS çözümleyicisi bazı cihazlarda bozuk olabiliyor. Sırasıyla 3
-yedek yöntem deneniyor: Android native (pyjnius), DNS-over-TCP, Cloudflare
-DoH.
+AĞ / DNS NOTU: Sistem DNS çözümleyicisi bazı cihazlarda bozuk olabiliyor.
+Sırasıyla 3 yedek yöntem deneniyor: Android native (pyjnius), DNS-over-TCP,
+Cloudflare DoH.
 
-ÖNEMLİ DÜZELTME (v1.2):
-fetch_team_recent_matches artık AÇIK bir tarih aralığı (son ~200 gün)
-gönderiyor. Bunsuz API, "güncel sezon"a bakıyor; sezon arası dönemlerde
-(örn. yaz tatili) hiç maç dönmüyor ve TÜM takımlar için istatistikler
-aynı varsayılan (nötr) değerlere düşüyordu - bu da farklı maçların
-analiz sonuçlarının neredeyse aynı çıkmasına sebep oluyordu.
+TARİH ARALIĞI: fetch_upcoming_fixtures artık lig kodu BOŞ bırakılırsa
+TÜM liglerdeki maçları tarar (genel /v4/matches uç noktası).
+fetch_team_recent_matches, sezon arası dönemlerde boş sonuç dönmemesi
+için AÇIK bir tarih aralığı (son ~220 gün) gönderir.
 """
 
 import os
@@ -193,14 +187,24 @@ def _headers() -> dict:
 # ----------------------------------------------------------------------
 # 1) FİKSTÜR (Bülten) ÇEKME
 # ----------------------------------------------------------------------
-def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20,
+def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 40,
                              date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[dict]:
     """
-    Belirtilen ligin yaklaşan maçlarını döndürür.
-    date_from / date_to verilirse (YYYY-MM-DD), sadece o aralıktaki maçlar
-    gelir (örn. "Bugün" ya da "Bu Hafta" filtreleri için).
+    Maçları döndürür. competition_code BOŞ bırakılırsa TÜM liglerdeki
+    maçlar taranır (genel /v4/matches uç noktası). Belirli bir lig kodu
+    (PL, PD, SA...) verilirse sadece o lige bakılır.
     """
-    url = f"{FOOTBALL_DATA_BASE}/competitions/{competition_code}/matches"
+    code = (competition_code or "").strip().upper()
+    if code and code != "ALL":
+        url = f"{FOOTBALL_DATA_BASE}/competitions/{code}/matches"
+    else:
+        url = f"{FOOTBALL_DATA_BASE}/matches"
+
+    if not date_from and not date_to:
+        today = datetime.utcnow().date()
+        date_from = today.isoformat()
+        date_to = (today + timedelta(days=14)).isoformat()
+
     params = {"status": "SCHEDULED"}
     if date_from:
         params["dateFrom"] = date_from
@@ -213,13 +217,14 @@ def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20,
 
     fixtures = []
     for m in data.get("matches", [])[:limit]:
+        comp_name = m.get("competition", {}).get("name") or data.get("competition", {}).get("name", code or "Tüm Ligler")
         fixtures.append({
             "home": m["homeTeam"]["name"],
             "away": m["awayTeam"]["name"],
             "home_id": m["homeTeam"]["id"],
             "away_id": m["awayTeam"]["id"],
             "utc_date": m["utcDate"],
-            "league": data.get("competition", {}).get("name", competition_code),
+            "league": comp_name,
         })
     return fixtures
 
@@ -228,13 +233,6 @@ def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20,
 # 2) TAKIM FORMU (son 5 genel, son 3 ev/deplasman)
 # ----------------------------------------------------------------------
 def fetch_team_recent_matches(team_id: int, limit: int = 10) -> List[MatchResult]:
-    """
-    Bir takımın oynadığı son maçları (FINISHED) çeker.
-
-    ÖNEMLİ: dateFrom/dateTo AÇIKÇA belirtiliyor (son ~200 gün). Bu olmadan
-    API "güncel sezon"a bakıyor; sezon arası dönemlerde (yaz tatili gibi)
-    hiç sonuç dönmüyor ve tüm takımlar aynı varsayılan değerlere düşüyordu.
-    """
     today = datetime.utcnow().date()
     date_from = (today - timedelta(days=220)).isoformat()
     date_to = today.isoformat()
@@ -246,7 +244,6 @@ def fetch_team_recent_matches(team_id: int, limit: int = 10) -> List[MatchResult
     data = resp.json()
 
     matches_raw = data.get("matches", [])
-    # En güncel maçlar sonda olabilir; en sonuncu `limit` kadarını al
     matches_raw = matches_raw[-limit:] if len(matches_raw) > limit else matches_raw
 
     results = []
@@ -261,13 +258,11 @@ def fetch_team_recent_matches(team_id: int, limit: int = 10) -> List[MatchResult
             opponent=opponent, home=is_home,
             goals_for=gf, goals_against=ga, date=m.get("utcDate", "")
         ))
-    # En yeni maç en başta olacak şekilde sırala (form_score ağırlıkları buna göre)
     results.sort(key=lambda r: r.date, reverse=True)
     return results
 
 
 def build_team_stats(team_name: str, team_id: int) -> TeamStats:
-    """Bir takım için TeamStats nesnesini son maç verileriyle doldurur."""
     all_recent = fetch_team_recent_matches(team_id, limit=10)
     last5 = all_recent[:5]
     home_or_away_specific = [m for m in all_recent if m.home][:3]
@@ -297,7 +292,7 @@ def fetch_head_to_head(match_id: int, limit: int = 5) -> HeadToHead:
 
 
 # ----------------------------------------------------------------------
-# 3) KADRO PİYASA DEĞERİ (manuel CSV - Transfermarkt scrape edilmez)
+# 3) KADRO PİYASA DEĞERİ
 # ----------------------------------------------------------------------
 _MARKET_VALUE_CSV = os.path.join(os.path.dirname(__file__), "data", "market_values.csv")
 
@@ -317,7 +312,7 @@ def load_market_value(team_name: str) -> float:
 
 
 # ----------------------------------------------------------------------
-# 4) HAVA DURUMU (Open-Meteo - ücretsiz, anahtar gerektirmez)
+# 4) HAVA DURUMU
 # ----------------------------------------------------------------------
 def fetch_city_coordinates(city_name: str) -> Optional[dict]:
     resp = requests.get(GEOCODE_BASE, params={"name": city_name, "count": 1}, timeout=10)
