@@ -20,14 +20,30 @@ API ANAHTARI:
 Mobilde (Android) ortam değişkeni (environment variable) ayarlamak mümkün
 olmadığı için API anahtarı doğrudan aşağıdaki _HARDCODED_API_KEY sabitine
 gömülüdür.
+
+AĞ NOTU:
+Bazı mobil operatörlerde/ağlarda IPv6 DNS çözümlemesi bozuk çalışıyor ve
+urllib3'ün varsayılan (hem IPv4 hem IPv6 deneyen) davranışı bu yüzden
+başarısız olabiliyor. Bu yüzden aşağıda urllib3'ü SADECE IPv4 kullanmaya
+zorluyoruz. Bu, resmi/standart ve güvenli bir yöntemdir (raw socket
+kullanmaz, Android'de izin sorunu çıkarmaz).
 """
 
 import os
 import csv
+import socket
 from datetime import datetime
 from typing import List, Optional
 
 import requests
+import urllib3.util.connection as _urllib3_cn
+
+
+def _allowed_gai_family():
+    return socket.AF_INET
+
+
+_urllib3_cn.allowed_gai_family = _allowed_gai_family
 
 from models import MatchResult, TeamStats, HeadToHead, WeatherInfo, Fixture
 
