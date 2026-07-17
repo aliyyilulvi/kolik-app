@@ -15,11 +15,10 @@ version = 1.0.0
 
 # Bağımlılıklar (requirements.txt ile senkron tutulmalı)
 # NOT: numpy KASITLI OLARAK YOK - Android için cross-compile edilirken sık
-# hata veriyor (bkz. analyzer.py başındaki not). Analiz motoru saf Python'dur.
-# NOT: kivy 2.2.1 -> 2.3.1'e YÜKSELTİLDİ. Eski 2.2.1, Cython'ı <3.1 ile
-# sınırlıyordu ve bu eski Cython sürümlerinde "cgi" modülü importu vardı
-# (Python 3.13/3.14'te kaldırıldı). 2.3.1 daha güncel Cython'a izin veriyor.
-requirements = python3,kivy==2.3.1,requests,certifi,urllib3,chardet,idna
+# hata veriyor. Analiz motoru saf Python'dur.
+# NOT: pyjnius EKLENDİ - data_fetcher.py'deki Android native DNS
+# çözümleme fallback'i için garanti altına alındı.
+requirements = python3,kivy==2.3.1,requests,certifi,urllib3,chardet,idna,pyjnius
 
 # python-for-android dalı SABİTLENDİ: "master" Python 3.12'ye kadar kararlı
 # test edilmiş durumda.
@@ -75,9 +74,4 @@ warn_on_root = 1
 #
 # İlk derleme Android SDK/NDK indireceği için uzun sürebilir (30-60 dk).
 # Derleme sonunda APK dosyası ./bin/ klasöründe oluşur.
-#
-# NOT: API anahtarınızı (FOOTBALL_DATA_API_KEY) cihazda ortam değişkeni
-# olarak ayarlamak yerine, uygulama içi bir "Ayarlar" ekranından
-# kullanıcıya girdirip local storage'da saklamanız önerilir
-# (mobilde environment variable erişimi masaüstünden farklıdır).
 # ---------------------------------------------------------------------
