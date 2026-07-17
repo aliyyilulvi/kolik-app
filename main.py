@@ -3,13 +3,6 @@
 main.py
 -------
 Kolik uygulamasının Kivy giriş noktası.
-
-Ekranlar:
-  - BultenScreen: Ligden gelen yaklaşan maç listesini gösterir.
-  - AnalizScreen: Seçilen maç için Poisson tabanlı olasılık analizini gösterir.
-
-ÖNEMLİ: Arayüzde her zaman "olasılık / istatistiksel tahmin" ifadesi
-kullanılır; "kesin", "garanti" gibi ifadelerden kaçınılır (bkz. UYARI banner'ı).
 """
 
 import threading
@@ -21,39 +14,59 @@ from kivy.uix.label import Label
 from kivy.properties import StringProperty, ListProperty, BooleanProperty
 from kivy.clock import mainthread
 from kivy.metrics import dp
+from datetime import datetime, timedelta
 
 import data_fetcher
 from analyzer import analyze_fixture
+from market_labels import market_label
 
 KV_FILE = "kolik.kv"
 
-# Uygulama genelinde kullanılacak lig kodu (varsayılan; UI'dan değiştirilebilir)
-DEFAULT_LEAGUE_CODE = "PL"
+# Varsayılan lig kodu BOŞ = tüm ligler taranır
+DEFAULT_LEAGUE_CODE = ""
+
+DATE_RANGE_OPTIONS = ["Bugun", "Bu Hafta (7 gun)", "Bu Ay (30 gun)", "Tum Yaklasanlar"]
+
+
+def _date_range_for_option(option: str):
+    today = datetime.utcnow().date()
+    if option == "Bugun":
+        return today.isoformat(), today.isoformat()
+    if option == "Bu Hafta (7 gun)":
+        return today.isoformat(), (today + timedelta(days=7)).isoformat()
+    if option == "Bu Ay (30 gun)":
+        return today.isoformat(), (today + timedelta(days=30)).isoformat()
+    return None, None
 
 
 class MatchRow(BoxLayout):
-    """Bülten listesindeki tek bir maç satırı."""
     home_team = StringProperty("")
     away_team = StringProperty("")
     league = StringProperty("")
     kickoff = StringProperty("")
-    raw_fixture = None  # data_fetcher'dan gelen ham dict burada saklanır
+    raw_fixture = None
 
 
 class BultenScreen(Screen):
-    """Yaklaşan maçların listelendiği ana ekran."""
     loading = BooleanProperty(False)
     status_text = StringProperty("Bülten yüklemek için 'Yenile' butonuna basın.")
 
-    def refresh_fixtures(self, league_code: str = DEFAULT_LEAGUE_CODE):
+    def refresh_fixtures(self, league_code: str = DEFAULT_LEAGUE_CODE, date_option: str = "Bugun"):
         self.loading = True
         self.status_text = "Bülten yükleniyor..."
         self.ids.match_list.clear_widgets()
-        threading.Thread(target=self._fetch_worker, args=(league_code,), daemon=True).start()
+        date_from, date_to = _date_range_for_option(date_option)
+        threading.Thread(
+            target=self._fetch_worker,
+            args=(league_code, date_from, date_to),
+            daemon=True,
+        ).start()
 
-    def _fetch_worker(self, league_code: str):
+    def _fetch_worker(self, league_code: str, date_from, date_to):
         try:
-            fixtures = data_fetcher.fetch_upcoming_fixtures(league_code, limit=20)
+            fixtures = data_fetcher.fetch_upcoming_fixtures(
+                league_code, limit=40, date_from=date_from, date_to=date_to
+            )
             self._on_fixtures_loaded(fixtures)
         except Exception as e:
             import traceback
@@ -65,7 +78,7 @@ class BultenScreen(Screen):
     def _on_fixtures_loaded(self, fixtures):
         self.loading = False
         if not fixtures:
-            self.status_text = "Bu ligde yaklaşan maç bulunamadı."
+            self.status_text = "Bu filtrede yaklaşan maç bulunamadı."
             return
         self.status_text = f"{len(fixtures)} maç bulundu."
         for fx in fixtures:
@@ -89,7 +102,6 @@ class BultenScreen(Screen):
 
 
 class AnalizScreen(Screen):
-    """Seçilen maçın detaylı olasılık analizinin gösterildiği ekran."""
     loading = BooleanProperty(False)
     status_text = StringProperty("")
     home_team = StringProperty("")
@@ -120,37 +132,36 @@ class AnalizScreen(Screen):
         self.status_text = ""
         box = self.ids.results_box
 
-        # Beklenen goller
         eg = result.expected_goals
         box.add_widget(self._section_title(
             f"Beklenen Gol (xG benzeri): {self.home_team} {eg['home']}  -  {eg['away']} {self.away_team}"
         ))
 
-        # Öne çıkan istatistiksel seçimler
         box.add_widget(self._section_title("İSTATİSTİKSEL OLARAK ÖNE ÇIKAN SEÇİMLER"))
         for pick in result.top_picks:
-            box.add_widget(self._pick_row(pick["market"], pick["probability"]))
+            box.add_widget(self._pick_row(market_label(pick["market"]), pick["probability"]))
 
-        # Sürpriz senaryolar
         box.add_widget(self._section_title("DÜŞÜK OLASILIKLI SÜRPRİZ SENARYOLAR"))
         if result.surprise_picks:
             for pick in result.surprise_picks:
-                box.add_widget(self._pick_row(pick["market"], pick["probability"]))
+                box.add_widget(self._pick_row(market_label(pick["market"]), pick["probability"]))
         else:
-            box.add_widget(Label(text="Bu maç için belirgin bir sürpriz senaryo bulunamadı.",
-                                  size_hint_y=None, height=dp(30)))
+            lbl = Label(text="Bu maç için belirgin bir sürpriz senaryo bulunamadı.",
+                        size_hint_y=None, height=dp(30), halign="center")
+            lbl.text_size = (box.width, None)
+            box.add_widget(lbl)
 
-        # Tüm pazarlar (detay)
         box.add_widget(self._section_title("TÜM PAZARLAR (Detaylı Olasılık Tablosu)"))
         for market, prob in sorted(result.probabilities.items()):
-            box.add_widget(self._pick_row(market, prob, small=True))
+            box.add_widget(self._pick_row(market_label(market), prob, small=True))
 
-        # Şeffaflık notu
-        box.add_widget(Label(
+        note_label = Label(
             text=result.confidence_note,
             size_hint_y=None, height=dp(60), color=(0.85, 0.72, 0.25, 1),
             italic=True, halign="center", valign="middle"
-        ))
+        )
+        note_label.text_size = (box.width, None)
+        box.add_widget(note_label)
 
     @mainthread
     def _on_error(self, message: str):
@@ -158,13 +169,18 @@ class AnalizScreen(Screen):
         self.status_text = f"Hata: {message}"
 
     def _section_title(self, text):
-        lbl = Label(text=text, bold=True, size_hint_y=None, height=dp(36),
-                     color=(0.83, 0.68, 0.21, 1))
+        lbl = Label(text=text, bold=True, size_hint_y=None, height=dp(44),
+                     color=(0.83, 0.68, 0.21, 1), halign="center", valign="middle")
+        lbl.text_size = (self.ids.results_box.width, None)
         return lbl
 
     def _pick_row(self, market, prob, small=False):
-        row = BoxLayout(size_hint_y=None, height=dp(26 if small else 32))
-        row.add_widget(Label(text=market, halign="left", color=(0.9, 0.9, 0.9, 1)))
+        row = BoxLayout(size_hint_y=None, height=dp(30 if small else 40),
+                         padding=[dp(4), 0])
+        market_lbl = Label(text=market, halign="left", valign="middle",
+                            color=(0.9, 0.9, 0.9, 1), font_size="11sp" if small else "13sp")
+        market_lbl.text_size = (self.ids.results_box.width * 0.68, None)
+        row.add_widget(market_lbl)
         row.add_widget(Label(text=f"%{prob}", halign="right", bold=not small,
                               color=(0.13, 0.55, 0.36, 1)))
         return row
@@ -175,7 +191,6 @@ class KolikScreenManager(ScreenManager):
 
 
 class KolikApp(App):
-    """Kolik uygulamasının ana App sınıfı."""
     title = "Kolik"
 
     def build(self):
