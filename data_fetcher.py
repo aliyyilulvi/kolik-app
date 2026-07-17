@@ -16,12 +16,16 @@ API ANAHTARI:
 Mobilde ortam değişkeni çalışmadığı için _HARDCODED_API_KEY'e gömülüdür.
 
 AĞ / DNS NOTU:
-Bu cihazda Python'un native DNS çözümleyicisi bozuk. Sırasıyla 3 yedek
-yöntem deneniyor: (1) Android'in kendi Java DNS'i (pyjnius), (2) DNS
-sorgusunu TCP üzerinden (RFC1035) 8.8.8.8'e gönderme - raw UDP DEĞİL,
-normal TCP socket kullanır, bu yüzden Android'in UDP kısıtlamasına
-takılmaz, (3) Cloudflare DNS-over-HTTPS. Hepsi başarısız olursa hata
-mesajında HANGİ yöntemin neden başarısız olduğu gösterilir.
+Sistem DNS çözümleyicisi bazı cihazlarda bozuk olabiliyor. Sırasıyla 3
+yedek yöntem deneniyor: Android native (pyjnius), DNS-over-TCP, Cloudflare
+DoH.
+
+ÖNEMLİ DÜZELTME (v1.2):
+fetch_team_recent_matches artık AÇIK bir tarih aralığı (son ~200 gün)
+gönderiyor. Bunsuz API, "güncel sezon"a bakıyor; sezon arası dönemlerde
+(örn. yaz tatili) hiç maç dönmüyor ve TÜM takımlar için istatistikler
+aynı varsayılan (nötr) değerlere düşüyordu - bu da farklı maçların
+analiz sonuçlarının neredeyse aynı çıkmasına sebep oluyordu.
 """
 
 import os
@@ -29,7 +33,7 @@ import csv
 import socket
 import struct
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import requests
@@ -48,7 +52,6 @@ _last_dns_debug = []
 
 
 def _resolve_via_android(hostname: str) -> list:
-    """Android'in kendi Java DNS çözümleyicisini (pyjnius üzerinden) dener."""
     try:
         from jnius import autoclass
         InetAddress = autoclass("java.net.InetAddress")
@@ -64,7 +67,7 @@ def _build_dns_query(hostname: str) -> bytes:
     header = struct.pack(">HHHHHH", transaction_id, 0x0100, 1, 0, 0, 0)
     parts = hostname.split(".")
     question = b"".join(struct.pack("B", len(p)) + p.encode() for p in parts) + b"\x00"
-    question += struct.pack(">HH", 1, 1)  # type=A, class=IN
+    question += struct.pack(">HH", 1, 1)
     return header + question
 
 
@@ -73,7 +76,7 @@ def _parse_dns_response(data: bytes) -> list:
     idx = 12
     while data[idx] != 0:
         idx += data[idx] + 1
-    idx += 5  # null byte + qtype(2) + qclass(2)
+    idx += 5
 
     ips = []
     for _ in range(ancount):
@@ -93,14 +96,9 @@ def _parse_dns_response(data: bytes) -> list:
 
 
 def _resolve_via_dns_tcp(hostname: str, dns_server: str = "8.8.8.8", port: int = 53, timeout: float = 6.0) -> list:
-    """
-    DNS sorgusunu NORMAL TCP socket ile yapar (raw UDP DEĞİL). HTTPS
-    bağlantılarımızda kullandığımızla AYNI socket türü (SOCK_STREAM),
-    bu yüzden Android'in UDP/raw socket kısıtlamasına takılmaz.
-    """
     try:
         query = _build_dns_query(hostname)
-        tcp_query = struct.pack(">H", len(query)) + query  # RFC1035: 2 byte uzunluk öneki
+        tcp_query = struct.pack(">H", len(query)) + query
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
@@ -129,7 +127,6 @@ def _resolve_via_dns_tcp(hostname: str, dns_server: str = "8.8.8.8", port: int =
 
 
 def _resolve_via_doh(hostname: str, timeout: float = 6.0) -> list:
-    """Cloudflare DNS-over-HTTPS ile hostname çözümler (üçüncü yedek)."""
     try:
         resp = requests.get(
             "https://1.1.1.1/dns-query",
@@ -193,9 +190,23 @@ def _headers() -> dict:
     return {"X-Auth-Token": _api_key()}
 
 
-def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20) -> List[dict]:
+# ----------------------------------------------------------------------
+# 1) FİKSTÜR (Bülten) ÇEKME
+# ----------------------------------------------------------------------
+def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20,
+                             date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[dict]:
+    """
+    Belirtilen ligin yaklaşan maçlarını döndürür.
+    date_from / date_to verilirse (YYYY-MM-DD), sadece o aralıktaki maçlar
+    gelir (örn. "Bugün" ya da "Bu Hafta" filtreleri için).
+    """
     url = f"{FOOTBALL_DATA_BASE}/competitions/{competition_code}/matches"
     params = {"status": "SCHEDULED"}
+    if date_from:
+        params["dateFrom"] = date_from
+    if date_to:
+        params["dateTo"] = date_to
+
     resp = requests.get(url, headers=_headers(), params=params, timeout=15)
     resp.raise_for_status()
     data = resp.json()
@@ -213,15 +224,33 @@ def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20) -> Li
     return fixtures
 
 
+# ----------------------------------------------------------------------
+# 2) TAKIM FORMU (son 5 genel, son 3 ev/deplasman)
+# ----------------------------------------------------------------------
 def fetch_team_recent_matches(team_id: int, limit: int = 10) -> List[MatchResult]:
+    """
+    Bir takımın oynadığı son maçları (FINISHED) çeker.
+
+    ÖNEMLİ: dateFrom/dateTo AÇIKÇA belirtiliyor (son ~200 gün). Bu olmadan
+    API "güncel sezon"a bakıyor; sezon arası dönemlerde (yaz tatili gibi)
+    hiç sonuç dönmüyor ve tüm takımlar aynı varsayılan değerlere düşüyordu.
+    """
+    today = datetime.utcnow().date()
+    date_from = (today - timedelta(days=220)).isoformat()
+    date_to = today.isoformat()
+
     url = f"{FOOTBALL_DATA_BASE}/teams/{team_id}/matches"
-    params = {"status": "FINISHED", "limit": limit}
+    params = {"status": "FINISHED", "dateFrom": date_from, "dateTo": date_to}
     resp = requests.get(url, headers=_headers(), params=params, timeout=15)
     resp.raise_for_status()
     data = resp.json()
 
+    matches_raw = data.get("matches", [])
+    # En güncel maçlar sonda olabilir; en sonuncu `limit` kadarını al
+    matches_raw = matches_raw[-limit:] if len(matches_raw) > limit else matches_raw
+
     results = []
-    for m in data.get("matches", []):
+    for m in matches_raw:
         is_home = m["homeTeam"]["id"] == team_id
         gf = m["score"]["fullTime"]["home"] if is_home else m["score"]["fullTime"]["away"]
         ga = m["score"]["fullTime"]["away"] if is_home else m["score"]["fullTime"]["home"]
@@ -232,10 +261,13 @@ def fetch_team_recent_matches(team_id: int, limit: int = 10) -> List[MatchResult
             opponent=opponent, home=is_home,
             goals_for=gf, goals_against=ga, date=m.get("utcDate", "")
         ))
+    # En yeni maç en başta olacak şekilde sırala (form_score ağırlıkları buna göre)
+    results.sort(key=lambda r: r.date, reverse=True)
     return results
 
 
 def build_team_stats(team_name: str, team_id: int) -> TeamStats:
+    """Bir takım için TeamStats nesnesini son maç verileriyle doldurur."""
     all_recent = fetch_team_recent_matches(team_id, limit=10)
     last5 = all_recent[:5]
     home_or_away_specific = [m for m in all_recent if m.home][:3]
@@ -264,6 +296,9 @@ def fetch_head_to_head(match_id: int, limit: int = 5) -> HeadToHead:
     return HeadToHead(matches=matches)
 
 
+# ----------------------------------------------------------------------
+# 3) KADRO PİYASA DEĞERİ (manuel CSV - Transfermarkt scrape edilmez)
+# ----------------------------------------------------------------------
 _MARKET_VALUE_CSV = os.path.join(os.path.dirname(__file__), "data", "market_values.csv")
 
 
@@ -281,6 +316,9 @@ def load_market_value(team_name: str) -> float:
     return 0.0
 
 
+# ----------------------------------------------------------------------
+# 4) HAVA DURUMU (Open-Meteo - ücretsiz, anahtar gerektirmez)
+# ----------------------------------------------------------------------
 def fetch_city_coordinates(city_name: str) -> Optional[dict]:
     resp = requests.get(GEOCODE_BASE, params={"name": city_name, "count": 1}, timeout=10)
     resp.raise_for_status()
