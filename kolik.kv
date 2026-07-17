@@ -111,9 +111,12 @@
         Label:
             text: root.status_text
             size_hint_y: None
-            height: dp(26)
+            height: max(dp(26), self.texture_size[1] + dp(10))
             color: 0.831, 0.686, 0.216, 1
             font_size: "12sp"
+            halign: "left"
+            valign: "top"
+            text_size: self.width, None
 
         ScrollView:
             do_scroll_x: False
@@ -172,8 +175,11 @@
         Label:
             text: root.status_text
             size_hint_y: None
-            height: dp(26)
+            height: max(dp(26), self.texture_size[1] + dp(10))
             color: 0.831, 0.686, 0.216, 1
+            halign: "left"
+            valign: "top"
+            text_size: self.width, None
 
         ScrollView:
             do_scroll_x: False
