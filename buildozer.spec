@@ -16,14 +16,13 @@ version = 1.0.0
 # Bağımlılıklar (requirements.txt ile senkron tutulmalı)
 # NOT: numpy KASITLI OLARAK YOK - Android için cross-compile edilirken sık
 # hata veriyor (bkz. analyzer.py başındaki not). Analiz motoru saf Python'dur.
-# NOT: cython BURADA OLMAMALI - bu satır Android'e Cython'ı cihaz için de
-# derletiyordu (gereksiz + Python 3.14 hedefiyle çakışıyordu). Cython sadece
-# kivy'nin KENDİSİNİ derlerken host makinede arka planda kullanılır.
-requirements = python3,kivy==2.2.1,requests,certifi,urllib3,chardet,idna
+# NOT: kivy 2.2.1 -> 2.3.1'e YÜKSELTİLDİ. Eski 2.2.1, Cython'ı <3.1 ile
+# sınırlıyordu ve bu eski Cython sürümlerinde "cgi" modülü importu vardı
+# (Python 3.13/3.14'te kaldırıldı). 2.3.1 daha güncel Cython'a izin veriyor.
+requirements = python3,kivy==2.3.1,requests,certifi,urllib3,chardet,idna
 
 # python-for-android dalı SABİTLENDİ: "master" Python 3.12'ye kadar kararlı
-# test edilmiş durumda. Pin olmadan bazı ortamlarda henüz kararsız olan
-# Python 3.14 hedefine geçiliyor ve build kırılıyordu.
+# test edilmiş durumda.
 p4a.branch = master
 
 # Uygulama ikonu / splash (opsiyonel - kendi görsellerinizi ekleyin)
