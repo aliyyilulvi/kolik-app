@@ -16,77 +16,18 @@ scrape etmez. Bunun yerine:
      data/market_values.csv dosyasına KENDİSİ girer (manuel/opsiyonel).
      Girilmezse analiz motoru bu faktörü nötr (1.0) kabul eder.
 
-API anahtarınızı environment variable olarak ayarlayın:
-    export FOOTBALL_DATA_API_KEY="xxxxx"
-(https://www.football-data.org/client/register adresinden ücretsiz alınabilir)
+API ANAHTARI:
+Mobilde (Android) ortam değişkeni (environment variable) ayarlamak mümkün
+olmadığı için API anahtarı doğrudan aşağıdaki _HARDCODED_API_KEY sabitine
+gömülüdür.
 """
 
 import os
 import csv
-import requests
-import socket
-import urllib3.util.connection as _urllib3_cn
-
-def _allowed_gai_family():
-    return socket.AF_INET
-
-_urllib3_cn.allowed_gai_family = _allowed_gai_family
-import struct
-import random
-
-_original_getaddrinfo = socket.getaddrinfo
-
-def _dns_query_udp(hostname, dns_server="8.8.8.8", port=53, timeout=5):
-    transaction_id = random.randint(0, 65535)
-    header = struct.pack(">HHHHHH", transaction_id, 0x0100, 1, 0, 0, 0)
-    parts = hostname.split(".")
-    question = b"".join(struct.pack("B", len(p)) + p.encode() for p in parts) + b"\x00"
-    question += struct.pack(">HH", 1, 1)
-    packet = header + question
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(timeout)
-    try:
-        sock.sendto(packet, (dns_server, port))
-        data, _ = sock.recvfrom(512)
-    finally:
-        sock.close()
-
-    ancount = struct.unpack(">H", data[6:8])[0]
-    idx = 12
-    while data[idx] != 0:
-        idx += data[idx] + 1
-    idx += 5
-
-    ips = []
-    for _ in range(ancount):
-        if data[idx] & 0xC0 == 0xC0:
-            idx += 2
-        else:
-            while data[idx] != 0:
-                idx += data[idx] + 1
-            idx += 1
-        rtype, rclass, ttl, rdlength = struct.unpack(">HHIH", data[idx:idx+10])
-        idx += 10
-        if rtype == 1 and rdlength == 4:
-            ip = ".".join(str(b) for b in data[idx:idx+4])
-            ips.append(ip)
-        idx += rdlength
-
-    return ips
-
-def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    try:
-        return _original_getaddrinfo(host, port, family, type, proto, flags)
-    except socket.gaierror:
-        ips = _dns_query_udp(host)
-        if not ips:
-            raise
-        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port)) for ip in ips]
-
-socket.getaddrinfo = _patched_getaddrinfo
 from datetime import datetime
 from typing import List, Optional
+
+import requests
 
 from models import MatchResult, TeamStats, HeadToHead, WeatherInfo, Fixture
 
@@ -94,9 +35,12 @@ FOOTBALL_DATA_BASE = "https://api.football-data.org/v4"
 OPEN_METEO_BASE = "https://api.open-meteo.com/v1/forecast"
 GEOCODE_BASE = "https://geocoding-api.open-meteo.com/v1/search"
 
+# Mobilde ortam değişkeni çalışmadığı için API anahtarı doğrudan buraya gömülüdür.
+_HARDCODED_API_KEY = "6fdc17feb0d5436782e4382f3a1daa86"
+
 
 def _api_key() -> str:
-    key = os.environ.get("FOOTBALL_DATA_API_KEY", "")
+    key = _HARDCODED_API_KEY or os.environ.get("FOOTBALL_DATA_API_KEY", "")
     if not key:
         raise RuntimeError(
             "FOOTBALL_DATA_API_KEY tanımlı değil. Ücretsiz anahtar için: "
