@@ -20,15 +20,12 @@ API ANAHTARI:
 Mobilde (Android) ortam değişkeni ayarlamak mümkün olmadığı için API
 anahtarı doğrudan aşağıdaki _HARDCODED_API_KEY sabitine gömülüdür.
 
-AĞ / DNS NOTU:
-Bazı Android derlemelerinde (python-for-android) cihaz üzerinde
-socket.getaddrinfo() (isim çözümleme) tamamen bozuk çalışabiliyor -
-gerçek internet bağlantısıyla ilgisi yoktur, derlenmiş Python'un native
-kodundaki bir sorundur. Bunu aşmak için: sistem çözümleyicisi
-başarısız olursa, Cloudflare'in DNS-over-HTTPS servisine SABİT bir IP
-(1.1.1.1) üzerinden bağlanarak (bu yüzden DNS'e hiç ihtiyaç duymadan)
-hostname'i çözüyoruz. Bu yöntem normal HTTPS bağlantısı kullanır (raw
-socket AÇMAZ), bu yüzden Android'in izin kısıtlamalarına takılmaz.
+AĞ / DNS NOTU (ÖNEMLİ):
+Bu Android derlemesinde Python'un yerleşik socket.getaddrinfo() (isim
+çözümleme) fonksiyonu tamamen bozuk çalışıyor - sabit bir IP adresine
+bile bağlanamıyor. Bunu aşmak için önce Android'in KENDİ, çalışan Java
+DNS çözümleyicisini (java.net.InetAddress, pyjnius köprüsüyle) deniyoruz;
+o da olmazsa Cloudflare DNS-over-HTTPS'e (1.1.1.1) düşüyoruz.
 """
 
 import os
@@ -50,12 +47,24 @@ def _allowed_gai_family():
 _urllib3_cn.allowed_gai_family = _allowed_gai_family
 
 
+def _resolve_via_android(hostname: str) -> list:
+    """
+    Android'in kendi Java DNS çözümleyicisini (java.net.InetAddress)
+    pyjnius üzerinden kullanır. Python'un native getaddrinfo()'sundan
+    tamamen bağımsızdır, bu yüzden onun bozuk olmasından etkilenmez.
+    Sadece gerçek Android cihazda çalışır (masaüstünde pyjnius yoktur).
+    """
+    try:
+        from jnius import autoclass
+        InetAddress = autoclass("java.net.InetAddress")
+        addresses = InetAddress.getAllByName(hostname)
+        return [a.getHostAddress() for a in addresses]
+    except Exception:
+        return []
+
+
 def _resolve_via_doh(hostname: str, timeout: float = 6.0) -> list:
-    """
-    Cloudflare DNS-over-HTTPS ile hostname çözümler. 1.1.1.1 SABİT bir IP
-    olduğu için bu istek herhangi bir DNS çözümlemesine ihtiyaç duymaz,
-    dolayısıyla sistemin bozuk çözümleyicisini atlar.
-    """
+    """Cloudflare DNS-over-HTTPS ile hostname çözümler (yedek yöntem)."""
     try:
         resp = requests.get(
             "https://1.1.1.1/dns-query",
@@ -75,13 +84,21 @@ def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     try:
         return _original_getaddrinfo(host, port, family, type, proto, flags)
     except socket.gaierror:
+        pass
+
+    # 1) Önce Android'in kendi (çalışan) DNS çözümleyicisini dene
+    ips = _resolve_via_android(host)
+    # 2) Olmazsa Cloudflare DoH'a düş
+    if not ips:
         ips = _resolve_via_doh(host)
-        if not ips:
-            raise
-        return [
-            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))
-            for ip in ips
-        ]
+
+    if not ips:
+        raise socket.gaierror(f"'{host}' çözümlenemedi (tüm yöntemler başarısız)")
+
+    return [
+        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))
+        for ip in ips
+    ]
 
 
 socket.getaddrinfo = _patched_getaddrinfo
@@ -114,12 +131,6 @@ def _headers() -> dict:
 # 1) FİKSTÜR (Bülten) ÇEKME
 # ----------------------------------------------------------------------
 def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20) -> List[dict]:
-    """
-    Belirtilen ligin yaklaşan maçlarını döndürür.
-    competition_code örnekleri: "PL" (İngiltere), "PD" (İspanya), "SA" (İtalya),
-    "BL1" (Almanya), "TR1" (Türkiye Süper Lig - destekleniyorsa).
-    Dönüş: [{"home": "...", "away": "...", "home_id":.., "away_id":.., "utc_date":..., "league":...}, ...]
-    """
     url = f"{FOOTBALL_DATA_BASE}/competitions/{competition_code}/matches"
     params = {"status": "SCHEDULED"}
     resp = requests.get(url, headers=_headers(), params=params, timeout=15)
@@ -143,7 +154,6 @@ def fetch_upcoming_fixtures(competition_code: str = "PL", limit: int = 20) -> Li
 # 2) TAKIM FORMU (son 5 genel, son 3 ev/deplasman)
 # ----------------------------------------------------------------------
 def fetch_team_recent_matches(team_id: int, limit: int = 10) -> List[MatchResult]:
-    """Bir takımın oynadığı son maçları (FINISHED) çeker."""
     url = f"{FOOTBALL_DATA_BASE}/teams/{team_id}/matches"
     params = {"status": "FINISHED", "limit": limit}
     resp = requests.get(url, headers=_headers(), params=params, timeout=15)
@@ -166,20 +176,16 @@ def fetch_team_recent_matches(team_id: int, limit: int = 10) -> List[MatchResult
 
 
 def build_team_stats(team_name: str, team_id: int) -> TeamStats:
-    """Bir takım için TeamStats nesnesini son maç verileriyle doldurur."""
     all_recent = fetch_team_recent_matches(team_id, limit=10)
     last5 = all_recent[:5]
-    # Sadece ev sahibiyken oynadığı / sadece deplasmandayken oynadığı son 3 maç
-    home_or_away_specific = [m for m in all_recent if m.home][:3]  # çağıran taraf belirleyecek
+    home_or_away_specific = [m for m in all_recent if m.home][:3]
 
     stats = TeamStats(name=team_name, last5_all=last5, last3_home_or_away=home_or_away_specific)
-    # Kadro değeri varsa CSV'den yükle
     stats.squad_market_value_eur = load_market_value(team_name)
     return stats
 
 
 def fetch_head_to_head(match_id: int, limit: int = 5) -> HeadToHead:
-    """İki takım arasındaki geçmiş karşılaşmaları çeker (football-data.org head2head endpoint)."""
     url = f"{FOOTBALL_DATA_BASE}/matches/{match_id}/head2head"
     params = {"limit": limit}
     resp = requests.get(url, headers=_headers(), params=params, timeout=15)
@@ -205,12 +211,6 @@ _MARKET_VALUE_CSV = os.path.join(os.path.dirname(__file__), "data", "market_valu
 
 
 def load_market_value(team_name: str) -> float:
-    """
-    data/market_values.csv dosyasından takımın kadro değerini (EUR) okur.
-    Dosya formatı: team_name,market_value_eur
-    Bu dosyayı kullanıcı Transfermarkt'ta gördüğü GÜNCEL değeri elle girerek
-    kendisi doldurur (siteyi otomatik scrape etmiyoruz).
-    """
     if not os.path.exists(_MARKET_VALUE_CSV):
         return 0.0
     with open(_MARKET_VALUE_CSV, newline="", encoding="utf-8") as f:
@@ -239,10 +239,6 @@ def fetch_city_coordinates(city_name: str) -> Optional[dict]:
 
 
 def fetch_weather(city_name: str, match_date: str) -> WeatherInfo:
-    """
-    match_date formatı: 'YYYY-MM-DD'. Maç günü için tahmini hava durumunu döndürür.
-    Şehir bulunamazsa veya tarih çok ileri/geri ise nötr WeatherInfo döner.
-    """
     coords = fetch_city_coordinates(city_name)
     if not coords:
         return WeatherInfo()
@@ -274,18 +270,12 @@ def fetch_weather(city_name: str, match_date: str) -> WeatherInfo:
 # 5) TÜMÜNÜ BİRLEŞTİREN YÜKSEK SEVİYE FONKSİYON
 # ----------------------------------------------------------------------
 def build_fixture(raw_fixture: dict) -> Fixture:
-    """
-    fetch_upcoming_fixtures'tan gelen ham bir kaydı, analiz motoruna
-    verilecek tam donanımlı bir Fixture nesnesine çevirir.
-    """
     home_stats = build_team_stats(raw_fixture["home"], raw_fixture["home_id"])
     away_stats = build_team_stats(raw_fixture["away"], raw_fixture["away_id"])
 
     match_date = raw_fixture["utc_date"][:10] if raw_fixture.get("utc_date") else \
         datetime.utcnow().strftime("%Y-%m-%d")
 
-    # Hava durumu için basitçe ev sahibi takım adını "şehir" gibi deniyoruz;
-    # gerçek kullanımda stadyum şehri eşleme tablosu eklenmesi önerilir.
     weather = fetch_weather(raw_fixture["home"], match_date)
 
     return Fixture(
@@ -295,6 +285,6 @@ def build_fixture(raw_fixture: dict) -> Fixture:
         kickoff=raw_fixture.get("utc_date", ""),
         home_stats=home_stats,
         away_stats=away_stats,
-        h2h=None,  # match_id varsa fetch_head_to_head ile doldurulabilir
+        h2h=None,
         weather=weather,
     )
