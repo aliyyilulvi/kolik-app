@@ -2,7 +2,6 @@
 
 # Uygulama görünen adı
 title = Kolik
-
 # Paket adı / domain (Android package: org.kolik.app)
 package.name = kolik
 package.domain = org.kolik
@@ -18,7 +17,9 @@ version = 1.0.0
 # NOT: numpy KASITLI OLARAK YOK - Android için cross-compile edilirken sık
 # hata veriyor (bkz. analyzer.py başındaki not). Analiz motoru saf Python'dur.
 requirements = python3,kivy==2.2.1,cython==3.0.11,requests,certifi,urllib3,chardet,idna
-p4a.branch = v2024.01.21
+
+# p4a.branch = v2024.01.21  # KALDIRILDI: bu sürümde "-luuid" linker hatası vardı (NDK 25b + Python 3.11 uuid modülü).
+# Belirtilmediğinde buildozer, p4a'nın güncel/stable sürümünü kullanır ve bu hata giderilmiş oluyor.
 
 # Uygulama ikonu / splash (opsiyonel - kendi görsellerinizi ekleyin)
 # icon.filename = %(source.dir)s/data/icon.png
@@ -33,6 +34,7 @@ fullscreen = 0
 # ---------------------------------------------------------------------
 # ANDROID AYARLARI
 # ---------------------------------------------------------------------
+
 [app:android]
 
 # İnternet izni ZORUNLU: API'lerden veri çekmek için
