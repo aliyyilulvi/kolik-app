@@ -17,16 +17,18 @@ scrape etmez. Bunun yerine:
      Girilmezse analiz motoru bu faktörü nötr (1.0) kabul eder.
 
 API ANAHTARI:
-Mobilde (Android) ortam değişkeni (environment variable) ayarlamak mümkün
-olmadığı için API anahtarı doğrudan aşağıdaki _HARDCODED_API_KEY sabitine
-gömülüdür.
+Mobilde (Android) ortam değişkeni ayarlamak mümkün olmadığı için API
+anahtarı doğrudan aşağıdaki _HARDCODED_API_KEY sabitine gömülüdür.
 
-AĞ NOTU:
-Bazı mobil operatörlerde/ağlarda IPv6 DNS çözümlemesi bozuk çalışıyor ve
-urllib3'ün varsayılan (hem IPv4 hem IPv6 deneyen) davranışı bu yüzden
-başarısız olabiliyor. Bu yüzden aşağıda urllib3'ü SADECE IPv4 kullanmaya
-zorluyoruz. Bu, resmi/standart ve güvenli bir yöntemdir (raw socket
-kullanmaz, Android'de izin sorunu çıkarmaz).
+AĞ / DNS NOTU:
+Bazı Android derlemelerinde (python-for-android) cihaz üzerinde
+socket.getaddrinfo() (isim çözümleme) tamamen bozuk çalışabiliyor -
+gerçek internet bağlantısıyla ilgisi yoktur, derlenmiş Python'un native
+kodundaki bir sorundur. Bunu aşmak için: sistem çözümleyicisi
+başarısız olursa, Cloudflare'in DNS-over-HTTPS servisine SABİT bir IP
+(1.1.1.1) üzerinden bağlanarak (bu yüzden DNS'e hiç ihtiyaç duymadan)
+hostname'i çözüyoruz. Bu yöntem normal HTTPS bağlantısı kullanır (raw
+socket AÇMAZ), bu yüzden Android'in izin kısıtlamalarına takılmaz.
 """
 
 import os
@@ -38,12 +40,51 @@ from typing import List, Optional
 import requests
 import urllib3.util.connection as _urllib3_cn
 
+_original_getaddrinfo = socket.getaddrinfo
+
 
 def _allowed_gai_family():
     return socket.AF_INET
 
 
 _urllib3_cn.allowed_gai_family = _allowed_gai_family
+
+
+def _resolve_via_doh(hostname: str, timeout: float = 6.0) -> list:
+    """
+    Cloudflare DNS-over-HTTPS ile hostname çözümler. 1.1.1.1 SABİT bir IP
+    olduğu için bu istek herhangi bir DNS çözümlemesine ihtiyaç duymaz,
+    dolayısıyla sistemin bozuk çözümleyicisini atlar.
+    """
+    try:
+        resp = requests.get(
+            "https://1.1.1.1/dns-query",
+            params={"name": hostname, "type": "A"},
+            headers={"accept": "application/dns-json"},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        answers = data.get("Answer", [])
+        return [a["data"] for a in answers if a.get("type") == 1]
+    except Exception:
+        return []
+
+
+def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    try:
+        return _original_getaddrinfo(host, port, family, type, proto, flags)
+    except socket.gaierror:
+        ips = _resolve_via_doh(host)
+        if not ips:
+            raise
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))
+            for ip in ips
+        ]
+
+
+socket.getaddrinfo = _patched_getaddrinfo
 
 from models import MatchResult, TeamStats, HeadToHead, WeatherInfo, Fixture
 
