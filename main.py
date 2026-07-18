@@ -53,13 +53,24 @@ class BultenScreen(Screen):
     def shift_date(self, delta_days: int):
         self.selected_date += timedelta(days=delta_days)
         self.date_display = _format_date_tr(self.selected_date)
+        self.ids.search_input.text = ""
         self._search_mode = False
         self.refresh_fixtures()
+
+    def smart_refresh(self):
+        """
+        'Yenile' butonuna basılınca çağrılır. Arama kutusunda yazı varsa
+        o takımı TARİHTEN BAĞIMSIZ arar; boşsa seçili günün maçlarını getirir.
+        """
+        query = self.ids.search_input.text.strip()
+        if query:
+            self.search_team_wide(query)
+        else:
+            self.refresh_fixtures()
 
     def refresh_fixtures(self):
         self.loading = True
         self.status_text = "Bülten yükleniyor..."
-        self.ids.search_input.text = ""
         self._search_mode = False
         self.ids.match_list.clear_widgets()
         date_str = self.selected_date.isoformat()
@@ -124,12 +135,12 @@ class BultenScreen(Screen):
         self._render_fixtures(filtered)
 
     def search_team_wide(self, query: str):
-        """Enter'a basinca TARIHTEN BAGIMSIZ genis arama yapar (API'ye gider)."""
+        """TARİHTEN BAĞIMSIZ olarak (son 7 gün - gelecek 60 gün) o takımı arar."""
         query = (query or "").strip()
         if not query:
             return
         self.loading = True
-        self.status_text = f"\"{query}\" for tum tarihlerde aranıyor..."
+        self.status_text = f"\"{query}\" tum tarihlerde araniyor..."
         self.ids.match_list.clear_widgets()
         threading.Thread(target=self._search_worker, args=(query,), daemon=True).start()
 
@@ -159,9 +170,9 @@ class BultenScreen(Screen):
         self._search_mode = True
         self._all_fixtures = filtered
         if not filtered:
-            self.status_text = f"\"{query}\" icin sonuc bulunamadi (son 7 gun - gelecek 60 gun)."
+            self.status_text = f"\"{query}\" icin sonuc bulunamadi (son 7 gun - gelecek 60 gun araliginda)."
         else:
-            self.status_text = f"\"{query}\" icin {len(filtered)} mac bulundu."
+            self.status_text = f"\"{query}\" icin {len(filtered)} mac bulundu (tum tarihler)."
         self._render_fixtures(filtered)
 
     @mainthread
