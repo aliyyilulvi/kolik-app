@@ -11,43 +11,32 @@ modellenebildiği varsayımına dayanır (Maher, 1982 ve sonrası literatür).
 
 ÖNEMLİ ETİK/METODOLOJİK NOT:
 Bu motor "kesin sonuç" ya da "garanti" üretmez. Ürettiği tüm yüzdeler,
-geçmiş verilere dayalı İSTATİSTİKSEL OLASILIKLARDIR. Futbol doğası gereği
-yüksek varyanslı bir spordur; hiçbir model %100 (hatta güvenilir şekilde
-%80+) isabet garantisi veremez. UI katmanı bu yüzdeleri her zaman
-"olasılık" ifadesiyle ve belirsizlik notuyla birlikte göstermelidir.
+geçmiş verilere dayalı İSTATİSTİKSEL OLASILIKLARDIR.
 
-NOT (v1.1): Bu modül artık NumPy KULLANMIYOR. Android/Buildozer
-derlemesinde NumPy'ın cross-compile edilmesi sık sık başarısız oluyor
-(özellikle yeni Python sürümlerinde kaldırılan 'cgi' modülüne bağımlı
-eski Cython/Tempita bileşenleri yüzünden). Matris işlemleri saf Python
-listeleriyle (list of lists) yeniden yazıldı; sonuçlar birebir aynıdır.
+v1.2 NOTU: Dosyanın SONUNA evaluate_actual_result() fonksiyonu eklendi.
+Bu fonksiyon SADECE bitmiş bir maçın gerçek skoruna bakarak hangi
+pazarların "tuttuğunu" belirler; Poisson hesaplama mantığına dokunmaz.
 """
 
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, Set
 
 from models import Fixture, AnalysisResult
 
-MAX_GOALS = 6           # Skor matrisinde hesaplanacak maksimum gol sayısı
-LEAGUE_AVG_GOALS = 1.35  # Basit lig ortalaması varsayımı (gerçek kullanımda ligden hesaplanmalı)
-FIRST_HALF_GOAL_RATIO = 0.45  # Maçlarda gollerin istatistiksel olarak ~%45'i ilk yarıda atılır
+MAX_GOALS = 6
+LEAGUE_AVG_GOALS = 1.35
+FIRST_HALF_GOAL_RATIO = 0.45
 
-Matrix = List[List[float]]  # matrix[i][j] = P(ev_sahibi=i gol, deplasman=j gol)
+Matrix = List[List[float]]
 
 
 def _poisson_pmf(k: int, lam: float) -> float:
-    """P(X = k) burada X ~ Poisson(lam). Harici kütüphane bağımlılığı yok."""
     if lam <= 0:
         lam = 0.01
     return (lam ** k) * math.exp(-lam) / math.factorial(k)
 
 
 def _market_value_factor(home_value: float, away_value: float) -> Tuple[float, float]:
-    """
-    Kadro piyasa değeri oranını küçük bir çarpan olarak döndürür.
-    Aşırı etkiyi önlemek için logaritmik ölçek ve dar bir aralığa (0.92-1.08) sıkıştırılmıştır.
-    Değer verisi yoksa (0.0) nötr (1.0, 1.0) döner.
-    """
     if home_value <= 0 or away_value <= 0:
         return 1.0, 1.0
     ratio = math.log((home_value + 1) / (away_value + 1))
@@ -56,10 +45,6 @@ def _market_value_factor(home_value: float, away_value: float) -> Tuple[float, f
 
 
 def compute_expected_goals(fixture: Fixture) -> Tuple[float, float]:
-    """
-    Ev sahibi ve deplasman takımı için beklenen gol sayılarını (lambda) hesaplar.
-    Girdiler: son 5 genel form, ev/deplasmana özel son 3 maç, kadro değeri, hava durumu.
-    """
     hs, aws = fixture.home_stats, fixture.away_stats
 
     home_attack = hs.avg_goals_for() / LEAGUE_AVG_GOALS
@@ -96,7 +81,6 @@ def compute_expected_goals(fixture: Fixture) -> Tuple[float, float]:
 
 
 def build_score_matrix(lambda_home: float, lambda_away: float) -> Matrix:
-    """(MAX_GOALS+1) x (MAX_GOALS+1) boyutunda skor olasılık matrisi üretir (saf Python)."""
     home_probs = [_poisson_pmf(i, lambda_home) for i in range(MAX_GOALS + 1)]
     away_probs = [_poisson_pmf(j, lambda_away) for j in range(MAX_GOALS + 1)]
 
@@ -129,12 +113,10 @@ def _over_under_probs(matrix: Matrix, line: float) -> Dict[str, float]:
 
 
 def _row_sums(matrix: Matrix) -> List[float]:
-    """Her satırın (ev sahibi gol sayısının) marjinal olasılık dağılımı."""
     return [sum(row) for row in matrix]
 
 
 def _col_sums(matrix: Matrix) -> List[float]:
-    """Her sütunun (deplasman gol sayısının) marjinal olasılık dağılımı."""
     n_cols = len(matrix[0]) if matrix else 0
     return [sum(row[j] for row in matrix) for j in range(n_cols)]
 
@@ -145,22 +127,12 @@ def _team_goals_over_under(probs_1d: List[float], line: float) -> Dict[str, floa
 
 
 def _half_matrices(lambda_home: float, lambda_away: float) -> Tuple[Matrix, Matrix]:
-    """
-    İlk ve ikinci yarı için ayrı skor matrisleri üretir.
-    Basitleştirme: toplam beklenen golün FIRST_HALF_GOAL_RATIO kadarının ilk
-    yarıda, kalanının ikinci yarıda atıldığı varsayılır (istatistiksel ortalama).
-    """
     lh1, la1 = lambda_home * FIRST_HALF_GOAL_RATIO, lambda_away * FIRST_HALF_GOAL_RATIO
     lh2, la2 = lambda_home * (1 - FIRST_HALF_GOAL_RATIO), lambda_away * (1 - FIRST_HALF_GOAL_RATIO)
     return build_score_matrix(lh1, la1), build_score_matrix(lh2, la2)
 
 
 def _iy_ms_combinations(first_half_matrix: Matrix, full_match_matrix: Matrix) -> Dict[str, float]:
-    """
-    İY/MS (İlk Yarı / Maç Sonucu) 9 kombinasyonunu, ilk yarı ve maç sonucu
-    olasılıklarının BAĞIMSIZ olduğu basitleştirilmiş varsayımıyla hesaplar.
-    NOT: Gerçekte iki değişken tam bağımsız değildir; bu bir yaklaşıklıktır.
-    """
     iy = _match_result_probs(first_half_matrix)
     ms = _match_result_probs(full_match_matrix)
     combos = {}
@@ -171,13 +143,12 @@ def _iy_ms_combinations(first_half_matrix: Matrix, full_match_matrix: Matrix) ->
 
 
 def analyze_fixture(fixture: Fixture) -> AnalysisResult:
-    """Bir Fixture için tüm pazarları hesaplayıp AnalysisResult döndürür."""
     lambda_home, lambda_away = compute_expected_goals(fixture)
     matrix = build_score_matrix(lambda_home, lambda_away)
     fh_matrix, sh_matrix = _half_matrices(lambda_home, lambda_away)
 
-    home_marginal = _row_sums(matrix)   # ev sahibinin gol dağılımı
-    away_marginal = _col_sums(matrix)   # deplasmanın gol dağılımı
+    home_marginal = _row_sums(matrix)
+    away_marginal = _col_sums(matrix)
 
     probabilities: Dict[str, float] = {}
     probabilities.update(_match_result_probs(matrix))
@@ -185,17 +156,14 @@ def analyze_fixture(fixture: Fixture) -> AnalysisResult:
     for line in (1.5, 2.5, 3.5):
         probabilities.update(_over_under_probs(matrix, line))
 
-    # En çok gol olacak yarı
     fh_expected = lambda_home * FIRST_HALF_GOAL_RATIO + lambda_away * FIRST_HALF_GOAL_RATIO
     sh_expected = (lambda_home + lambda_away) - fh_expected
     total_half = fh_expected + sh_expected
     probabilities["1_YARI_COK_GOLLU"] = fh_expected / total_half if total_half else 0.5
     probabilities["2_YARI_COK_GOLLU"] = sh_expected / total_half if total_half else 0.5
 
-    # IY/MS kombinasyonları
     probabilities.update(_iy_ms_combinations(fh_matrix, matrix))
 
-    # Sadece ilk yarı / sadece ikinci yarı sonucu
     fh_result = _match_result_probs(fh_matrix)
     sh_result = _match_result_probs(sh_matrix)
     probabilities["IY_SADECE_1"] = fh_result["MS1"]
@@ -205,7 +173,6 @@ def analyze_fixture(fixture: Fixture) -> AnalysisResult:
     probabilities["2Y_SADECE_X"] = sh_result["MSX"]
     probabilities["2Y_SADECE_2"] = sh_result["MS2"]
 
-    # Ev sahibi / deplasman gol alt-üst (1.5 hattı örnek alınmıştır)
     home_ou = _team_goals_over_under(home_marginal, 1.5)
     away_ou = _team_goals_over_under(away_marginal, 1.5)
     probabilities["EV_GOL_UST_1.5"] = home_ou["UST"]
@@ -213,7 +180,6 @@ def analyze_fixture(fixture: Fixture) -> AnalysisResult:
     probabilities["DEP_GOL_UST_1.5"] = away_ou["UST"]
     probabilities["DEP_GOL_ALT_1.5"] = away_ou["ALT"]
 
-    # Ev galibiyeti + KG var/yok ve Deplasman galibiyeti + KG var/yok kombinasyonları
     n = len(matrix)
     p_home_win_btts_yes = sum(
         matrix[i][j] for i in range(1, n) for j in range(1, n) if i > j
@@ -226,7 +192,6 @@ def analyze_fixture(fixture: Fixture) -> AnalysisResult:
     probabilities["DEP_GALIBIYET_KG_VAR"] = p_away_win_btts_yes
     probabilities["DEP_GALIBIYET_KG_YOK"] = probabilities["MS2"] - p_away_win_btts_yes
 
-    # --- Öne çıkan / sürpriz seçimler (dürüst çerçeveleme) ---
     sorted_probs = sorted(probabilities.items(), key=lambda x: x[1], reverse=True)
 
     top_picks = [
@@ -250,3 +215,93 @@ def analyze_fixture(fixture: Fixture) -> AnalysisResult:
         expected_goals={"home": round(float(lambda_home), 2), "away": round(float(lambda_away), 2)},
     )
     return result
+
+
+# ----------------------------------------------------------------------
+# v1.2 YENİ: GERÇEK SONUÇ DEĞERLENDİRME (bitmiş maçlar için "tuttu mu?")
+# ----------------------------------------------------------------------
+def evaluate_actual_result(home_goals: int, away_goals: int,
+                            ht_home_goals: Optional[int] = None,
+                            ht_away_goals: Optional[int] = None) -> Set[str]:
+    """
+    Bitmiş bir maçın GERÇEK skoruna bakarak, hangi pazar kodlarının
+    (MS1, ALT_2.5, KG_VAR vb.) gerçekleştiğini (tuttuğunu) döndürür.
+    Bu fonksiyon Poisson modelinden BAĞIMSIZDIR; sadece gerçek sonucu
+    yorumlar, tahmin üretmez.
+    """
+    hit: Set[str] = set()
+    total = home_goals + away_goals
+
+    if home_goals > away_goals:
+        hit.add("MS1")
+    elif home_goals == away_goals:
+        hit.add("MSX")
+    else:
+        hit.add("MS2")
+
+    if home_goals > 0 and away_goals > 0:
+        hit.add("KG_VAR")
+    else:
+        hit.add("KG_YOK")
+
+    for line in (1.5, 2.5, 3.5):
+        if total > line:
+            hit.add(f"UST_{line}")
+        else:
+            hit.add(f"ALT_{line}")
+
+    if home_goals > 1.5:
+        hit.add("EV_GOL_UST_1.5")
+    else:
+        hit.add("EV_GOL_ALT_1.5")
+    if away_goals > 1.5:
+        hit.add("DEP_GOL_UST_1.5")
+    else:
+        hit.add("DEP_GOL_ALT_1.5")
+
+    if home_goals > away_goals:
+        hit.add("EV_GALIBIYET_KG_VAR" if (home_goals > 0 and away_goals > 0) else "EV_GALIBIYET_KG_YOK")
+    if away_goals > home_goals:
+        hit.add("DEP_GALIBIYET_KG_VAR" if (home_goals > 0 and away_goals > 0) else "DEP_GALIBIYET_KG_YOK")
+
+    if ht_home_goals is not None and ht_away_goals is not None:
+        if ht_home_goals > ht_away_goals:
+            iy = "1"
+        elif ht_home_goals == ht_away_goals:
+            iy = "X"
+        else:
+            iy = "2"
+
+        if home_goals > away_goals:
+            ms = "1"
+        elif home_goals == away_goals:
+            ms = "X"
+        else:
+            ms = "2"
+
+        hit.add(f"IY{iy}/MS{ms}")
+
+        if ht_home_goals > ht_away_goals:
+            hit.add("IY_SADECE_1")
+        elif ht_home_goals == ht_away_goals:
+            hit.add("IY_SADECE_X")
+        else:
+            hit.add("IY_SADECE_2")
+
+        sh_home = home_goals - ht_home_goals
+        sh_away = away_goals - ht_away_goals
+        if sh_home > sh_away:
+            hit.add("2Y_SADECE_1")
+        elif sh_home == sh_away:
+            hit.add("2Y_SADECE_X")
+        else:
+            hit.add("2Y_SADECE_2")
+
+        fh_total = ht_home_goals + ht_away_goals
+        sh_total = sh_home + sh_away
+        if fh_total > sh_total:
+            hit.add("1_YARI_COK_GOLLU")
+        elif sh_total > fh_total:
+            hit.add("2_YARI_COK_GOLLU")
+
+    return hit
