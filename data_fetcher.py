@@ -16,10 +16,9 @@ AĞ / DNS NOTU: Sistem DNS çözümleyicisi bazı cihazlarda bozuk olabiliyor.
 Sırasıyla 3 yedek yöntem deneniyor: Android native (pyjnius), DNS-over-TCP,
 Cloudflare DoH.
 
-TARİH ARALIĞI: fetch_upcoming_fixtures artık lig kodu BOŞ bırakılırsa
-TÜM liglerdeki maçları tarar (genel /v4/matches uç noktası).
-fetch_team_recent_matches, sezon arası dönemlerde boş sonuç dönmemesi
-için AÇIK bir tarih aralığı (son ~220 gün) gönderir.
+v1.3 NOTU: fetch_upcoming_fixtures artık status filtresi UYGULAMIYOR -
+hem planlanan hem bitmiş maçlar birlikte dönüyor (skor bilgisiyle),
+böylece geçmiş maçların sonucunu görme özelliği çalışabiliyor.
 """
 
 import os
@@ -187,12 +186,14 @@ def _headers() -> dict:
 # ----------------------------------------------------------------------
 # 1) FİKSTÜR (Bülten) ÇEKME
 # ----------------------------------------------------------------------
-def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 40,
+def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 60,
                              date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[dict]:
     """
-    Maçları döndürür. competition_code BOŞ bırakılırsa TÜM liglerdeki
-    maçlar taranır (genel /v4/matches uç noktası). Belirli bir lig kodu
-    (PL, PD, SA...) verilirse sadece o lige bakılır.
+    Belirtilen tarih aralığındaki maçları döndürür (competition_code BOŞ
+    ise TÜM liglerde). status FİLTRESİ YOK - hem planlanan (SCHEDULED)
+    hem bitmiş (FINISHED) maçlar birlikte gelir; UI tarafı 'status'
+    alanına bakarak ayırt eder. FINISHED maçlar için skor bilgisi de
+    (home_goals, away_goals, ht_home_goals, ht_away_goals) döner.
     """
     code = (competition_code or "").strip().upper()
     if code and code != "ALL":
@@ -203,9 +204,9 @@ def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 40,
     if not date_from and not date_to:
         today = datetime.utcnow().date()
         date_from = today.isoformat()
-        date_to = (today + timedelta(days=14)).isoformat()
+        date_to = today.isoformat()
 
-    params = {"status": "SCHEDULED"}
+    params = {}
     if date_from:
         params["dateFrom"] = date_from
     if date_to:
@@ -218,6 +219,9 @@ def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 40,
     fixtures = []
     for m in data.get("matches", [])[:limit]:
         comp_name = m.get("competition", {}).get("name") or data.get("competition", {}).get("name", code or "Tüm Ligler")
+        status = m.get("status", "SCHEDULED")
+        full_time = (m.get("score") or {}).get("fullTime") or {}
+        half_time = (m.get("score") or {}).get("halfTime") or {}
         fixtures.append({
             "home": m["homeTeam"]["name"],
             "away": m["awayTeam"]["name"],
@@ -225,6 +229,11 @@ def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 40,
             "away_id": m["awayTeam"]["id"],
             "utc_date": m["utcDate"],
             "league": comp_name,
+            "status": status,
+            "home_goals": full_time.get("home"),
+            "away_goals": full_time.get("away"),
+            "ht_home_goals": half_time.get("home"),
+            "ht_away_goals": half_time.get("away"),
         })
     return fixtures
 
