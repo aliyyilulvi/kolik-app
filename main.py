@@ -48,28 +48,31 @@ class BultenScreen(Screen):
         self.selected_date = datetime.utcnow().date()
         self.date_display = _format_date_tr(self.selected_date)
         self._all_fixtures = []
+        self._search_mode = False
 
     def shift_date(self, delta_days: int):
         self.selected_date += timedelta(days=delta_days)
         self.date_display = _format_date_tr(self.selected_date)
-        self.refresh_fixtures(self.ids.league_input.text.strip())
+        self._search_mode = False
+        self.refresh_fixtures()
 
-    def refresh_fixtures(self, league_code: str = ""):
+    def refresh_fixtures(self):
         self.loading = True
         self.status_text = "Bülten yükleniyor..."
         self.ids.search_input.text = ""
+        self._search_mode = False
         self.ids.match_list.clear_widgets()
         date_str = self.selected_date.isoformat()
         threading.Thread(
             target=self._fetch_worker,
-            args=(league_code, date_str, date_str),
+            args=(date_str, date_str),
             daemon=True,
         ).start()
 
-    def _fetch_worker(self, league_code: str, date_from, date_to):
+    def _fetch_worker(self, date_from, date_to):
         try:
             fixtures = data_fetcher.fetch_upcoming_fixtures(
-                league_code, limit=60, date_from=date_from, date_to=date_to
+                "", limit=80, date_from=date_from, date_to=date_to
             )
             self._on_fixtures_loaded(fixtures)
         except Exception as e:
@@ -83,7 +86,7 @@ class BultenScreen(Screen):
         self.loading = False
         self._all_fixtures = fixtures
         if not fixtures:
-            self.status_text = f"{self.date_display} tarihinde bu filtrede maç bulunamadı."
+            self.status_text = f"{self.date_display} tarihinde maç bulunamadı."
         else:
             self.status_text = f"{len(fixtures)} maç bulundu ({self.date_display})."
         self._render_fixtures(fixtures)
@@ -107,17 +110,59 @@ class BultenScreen(Screen):
             self.ids.match_list.add_widget(row)
 
     def filter_matches(self, query: str):
+        """Yazarken YEREL (o an yüklü listede) hızlı filtre yapar."""
+        if self._search_mode:
+            return  # genis arama sonucu gosteriliyorsa yerel filtreyi karistirma
         query = (query or "").strip().lower()
         if not query:
-            filtered = self._all_fixtures
-        else:
-            filtered = [
-                fx for fx in self._all_fixtures
-                if query in fx["home"].lower() or query in fx["away"].lower()
-            ]
+            self._render_fixtures(self._all_fixtures)
+            return
+        filtered = [
+            fx for fx in self._all_fixtures
+            if query in fx["home"].lower() or query in fx["away"].lower()
+        ]
         self._render_fixtures(filtered)
-        if query:
-            self.status_text = f"{len(filtered)} sonuç bulundu (\"{query}\" için)."
+
+    def search_team_wide(self, query: str):
+        """Enter'a basinca TARIHTEN BAGIMSIZ genis arama yapar (API'ye gider)."""
+        query = (query or "").strip()
+        if not query:
+            return
+        self.loading = True
+        self.status_text = f"\"{query}\" for tum tarihlerde aranıyor..."
+        self.ids.match_list.clear_widgets()
+        threading.Thread(target=self._search_worker, args=(query,), daemon=True).start()
+
+    def _search_worker(self, query: str):
+        try:
+            today = datetime.utcnow().date()
+            date_from = (today - timedelta(days=7)).isoformat()
+            date_to = (today + timedelta(days=60)).isoformat()
+            fixtures = data_fetcher.fetch_upcoming_fixtures(
+                "", limit=300, date_from=date_from, date_to=date_to
+            )
+            q = query.lower()
+            filtered = [
+                fx for fx in fixtures
+                if q in fx["home"].lower() or q in fx["away"].lower()
+            ]
+            self._on_search_done(filtered, query)
+        except Exception as e:
+            import traceback
+            from kivy.logger import Logger
+            Logger.error("KOLIK: TAM HATA:\n" + traceback.format_exc())
+            self._on_error(str(e))
+
+    @mainthread
+    def _on_search_done(self, filtered, query):
+        self.loading = False
+        self._search_mode = True
+        self._all_fixtures = filtered
+        if not filtered:
+            self.status_text = f"\"{query}\" icin sonuc bulunamadi (son 7 gun - gelecek 60 gun)."
+        else:
+            self.status_text = f"\"{query}\" icin {len(filtered)} mac bulundu."
+        self._render_fixtures(filtered)
 
     @mainthread
     def _on_error(self, message: str):
@@ -142,7 +187,6 @@ class AnalizScreen(Screen):
         self.loading = True
         self.status_text = "Takım formu, H2H ve hava durumu verileri toplanıyor..."
         self.ids.results_box.clear_widgets()
-        self._raw_fixture = raw_fixture
         threading.Thread(target=self._analyze_worker, args=(raw_fixture,), daemon=True).start()
 
     def _analyze_worker(self, raw_fixture: dict):
