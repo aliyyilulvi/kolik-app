@@ -29,7 +29,7 @@
             shorten: True
             shorten_from: "right"
             max_lines: 2
-            font_size: "13sp"
+            font_size: "15sp"
         Label:
             text: root.league + "  |  " + root.kickoff
             color: 0.831, 0.686, 0.216, 0.85
@@ -86,31 +86,6 @@
         BoxLayout:
             size_hint_y: None
             height: dp(42)
-            spacing: dp(8)
-
-            TextInput:
-                id: league_input
-                text: ""
-                hint_text: "Lig kodu (bos = tum ligler, orn: PL)"
-                multiline: False
-                background_color: 0.063, 0.318, 0.235, 1
-                foreground_color: 0.949, 0.937, 0.902, 1
-                cursor_color: 0.831, 0.686, 0.216, 1
-                padding: [dp(10), dp(10)]
-
-            Button:
-                text: "Yenile"
-                size_hint_x: None
-                width: dp(90)
-                background_normal: ""
-                background_color: 0.831, 0.686, 0.216, 1
-                color: 0.043, 0.239, 0.180, 1
-                bold: True
-                on_release: root.refresh_fixtures(league_input.text.strip())
-
-        BoxLayout:
-            size_hint_y: None
-            height: dp(42)
             spacing: dp(6)
 
             Button:
@@ -141,17 +116,31 @@
                 bold: True
                 on_release: root.shift_date(1)
 
-        TextInput:
-            id: search_input
-            hint_text: "Takim adiyla ara (orn: Arsenal)"
-            multiline: False
+        BoxLayout:
             size_hint_y: None
-            height: dp(38)
-            background_color: 0.063, 0.318, 0.235, 1
-            foreground_color: 0.949, 0.937, 0.902, 1
-            cursor_color: 0.831, 0.686, 0.216, 1
-            padding: [dp(10), dp(8)]
-            on_text: root.filter_matches(self.text)
+            height: dp(42)
+            spacing: dp(8)
+
+            TextInput:
+                id: search_input
+                hint_text: "Takim adiyla ara (orn: Arsenal) - Enter'a basin"
+                multiline: False
+                background_color: 0.063, 0.318, 0.235, 1
+                foreground_color: 0.949, 0.937, 0.902, 1
+                cursor_color: 0.831, 0.686, 0.216, 1
+                padding: [dp(10), dp(10)]
+                on_text: root.filter_matches(self.text)
+                on_text_validate: root.search_team_wide(self.text)
+
+            Button:
+                text: "Yenile"
+                size_hint_x: None
+                width: dp(90)
+                background_normal: ""
+                background_color: 0.831, 0.686, 0.216, 1
+                color: 0.043, 0.239, 0.180, 1
+                bold: True
+                on_release: root.refresh_fixtures()
 
         Label:
             text: root.status_text
