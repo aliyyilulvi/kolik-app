@@ -33,13 +33,17 @@ def _format_date_tr(d: date) -> str:
     return f"{d.day} {_TR_MONTHS[d.month - 1]} {d.year}  ({_TR_DAYS[d.weekday()]})"
 
 
+def _bind_text_size(label):
+    """Etiketin text_size'ını KENDİ gerçek genişliğine dinamik bağlar
+    (parent'ın ilk render anındaki hatalı/eksik genişliğine güvenmek yerine)."""
+    label.bind(size=lambda inst, val: setattr(inst, "text_size", (val[0], None)))
+    return label
+
+
 class MatchRow(BoxLayout):
     """
-    ÖNEMLİ: Bu widget artık kolik.kv'deki bir <MatchRow>: kuralına
-    DAYANMIYOR - tüm alt widget'lar burada, Python'da elle inşa
-    ediliyor. Bu, kv kuralının olası çift uygulanması (bazı Android
-    yaşam döngüsü durumlarında görülen bilinen bir Kivy sorunu)
-    yüzünden içeriğin iki kez çizilmesini önler.
+    Bu widget kolik.kv'deki bir <MatchRow>: kuralına DAYANMIYOR - tüm alt
+    widget'lar burada, Python'da elle inşa ediliyor.
     """
     home_team = StringProperty("")
     away_team = StringProperty("")
@@ -69,7 +73,7 @@ class MatchRow(BoxLayout):
             shorten=True, shorten_from="right", max_lines=2,
             font_size="15sp",
         )
-        self._title_label.bind(size=self._sync_title_text_size)
+        _bind_text_size(self._title_label)
         text_box.add_widget(self._title_label)
 
         self._sub_label = Label(
@@ -78,7 +82,7 @@ class MatchRow(BoxLayout):
             halign="left", valign="middle",
             shorten=True, shorten_from="right",
         )
-        self._sub_label.bind(size=self._sync_sub_text_size)
+        _bind_text_size(self._sub_label)
         text_box.add_widget(self._sub_label)
 
         self.add_widget(text_box)
@@ -98,12 +102,6 @@ class MatchRow(BoxLayout):
     def _update_bg(self, *args):
         self._bg_rect.pos = self.pos
         self._bg_rect.size = self.size
-
-    def _sync_title_text_size(self, instance, value):
-        instance.text_size = (value[0], None)
-
-    def _sync_sub_text_size(self, instance, value):
-        instance.text_size = (value[0], None)
 
     def _refresh_title(self, *args):
         self._title_label.text = self.home_team + " vs " + self.away_team
@@ -232,14 +230,14 @@ class AnalizScreen(Screen):
                 bold=True, size_hint_y=None, height=dp(40),
                 color=(0.13, 0.75, 0.45, 1), halign="center", valign="middle"
             )
-            score_lbl.text_size = (box.width, None)
+            _bind_text_size(score_lbl)
             box.add_widget(score_lbl)
             hint_lbl = Label(
                 text="Yesil + isaretli satirlar gercekte TUTAN tahminlerdir.",
                 size_hint_y=None, height=dp(24), font_size="11sp",
                 color=(0.831, 0.686, 0.216, 0.8), halign="center", valign="middle"
             )
-            hint_lbl.text_size = (box.width, None)
+            _bind_text_size(hint_lbl)
             box.add_widget(hint_lbl)
 
         eg = result.expected_goals
@@ -258,7 +256,7 @@ class AnalizScreen(Screen):
         else:
             lbl = Label(text="Bu maç için belirgin bir sürpriz senaryo bulunamadı.",
                         size_hint_y=None, height=dp(30), halign="center")
-            lbl.text_size = (box.width, None)
+            _bind_text_size(lbl)
             box.add_widget(lbl)
 
         box.add_widget(self._section_title("TÜM PAZARLAR (Detaylı Olasılık Tablosu)"))
@@ -270,7 +268,7 @@ class AnalizScreen(Screen):
             size_hint_y=None, height=dp(60), color=(0.85, 0.72, 0.25, 1),
             italic=True, halign="center", valign="middle"
         )
-        note_label.text_size = (box.width, None)
+        _bind_text_size(note_label)
         box.add_widget(note_label)
 
     @mainthread
@@ -281,7 +279,7 @@ class AnalizScreen(Screen):
     def _section_title(self, text):
         lbl = Label(text=text, bold=True, size_hint_y=None, height=dp(44),
                      color=(0.83, 0.68, 0.21, 1), halign="center", valign="middle")
-        lbl.text_size = (self.ids.results_box.width, None)
+        _bind_text_size(lbl)
         return lbl
 
     def _pick_row(self, market_code, prob, hit=False, small=False):
@@ -293,13 +291,14 @@ class AnalizScreen(Screen):
         market_color = (0.20, 0.85, 0.45, 1) if hit else (0.9, 0.9, 0.9, 1)
         market_lbl = Label(text=label_text, halign="left", valign="middle",
                             color=market_color, bold=hit,
-                            font_size="11sp" if small else "13sp")
-        market_lbl.text_size = (self.ids.results_box.width * 0.68, None)
+                            font_size="11sp" if small else "13sp",
+                            size_hint_x=0.68)
+        _bind_text_size(market_lbl)
         row.add_widget(market_lbl)
 
         prob_color = (0.20, 0.85, 0.45, 1) if hit else (0.13, 0.55, 0.36, 1)
         row.add_widget(Label(text=f"%{prob}", halign="right", bold=(not small) or hit,
-                              color=prob_color))
+                              color=prob_color, size_hint_x=0.32))
         return row
 
 
