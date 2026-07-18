@@ -48,30 +48,15 @@ class BultenScreen(Screen):
         self.selected_date = datetime.utcnow().date()
         self.date_display = _format_date_tr(self.selected_date)
         self._all_fixtures = []
-        self._search_mode = False
 
     def shift_date(self, delta_days: int):
         self.selected_date += timedelta(days=delta_days)
         self.date_display = _format_date_tr(self.selected_date)
-        self.ids.search_input.text = ""
-        self._search_mode = False
         self.refresh_fixtures()
-
-    def smart_refresh(self):
-        """
-        'Yenile' butonuna basılınca çağrılır. Arama kutusunda yazı varsa
-        o takımı TARİHTEN BAĞIMSIZ arar; boşsa seçili günün maçlarını getirir.
-        """
-        query = self.ids.search_input.text.strip()
-        if query:
-            self.search_team_wide(query)
-        else:
-            self.refresh_fixtures()
 
     def refresh_fixtures(self):
         self.loading = True
         self.status_text = "Bülten yükleniyor..."
-        self._search_mode = False
         self.ids.match_list.clear_widgets()
         date_str = self.selected_date.isoformat()
         threading.Thread(
@@ -119,61 +104,6 @@ class BultenScreen(Screen):
             row.ids.select_btn.text = "Sonucu Gor" if is_finished else "Analiz Et"
             row.ids.select_btn.bind(on_release=lambda inst, f=fx: self.go_to_analysis(f))
             self.ids.match_list.add_widget(row)
-
-    def filter_matches(self, query: str):
-        """Yazarken YEREL (o an yüklü listede) hızlı filtre yapar."""
-        if self._search_mode:
-            return
-        query = (query or "").strip().lower()
-        if not query:
-            self._render_fixtures(self._all_fixtures)
-            return
-        filtered = [
-            fx for fx in self._all_fixtures
-            if query in fx["home"].lower() or query in fx["away"].lower()
-        ]
-        self._render_fixtures(filtered)
-
-    def search_team_wide(self, query: str):
-        """TARİHTEN BAĞIMSIZ olarak (son 7 gün - gelecek 60 gün) o takımı arar."""
-        query = (query or "").strip()
-        if not query:
-            return
-        self.loading = True
-        self.status_text = f"\"{query}\" tum tarihlerde araniyor..."
-        self.ids.match_list.clear_widgets()
-        threading.Thread(target=self._search_worker, args=(query,), daemon=True).start()
-
-    def _search_worker(self, query: str):
-        try:
-            today = datetime.utcnow().date()
-            date_from = (today - timedelta(days=7)).isoformat()
-            date_to = (today + timedelta(days=60)).isoformat()
-            fixtures = data_fetcher.fetch_upcoming_fixtures(
-                "", limit=300, date_from=date_from, date_to=date_to
-            )
-            q = query.lower()
-            filtered = [
-                fx for fx in fixtures
-                if q in fx["home"].lower() or q in fx["away"].lower()
-            ]
-            self._on_search_done(filtered, query)
-        except Exception as e:
-            import traceback
-            from kivy.logger import Logger
-            Logger.error("KOLIK: TAM HATA:\n" + traceback.format_exc())
-            self._on_error(str(e))
-
-    @mainthread
-    def _on_search_done(self, filtered, query):
-        self.loading = False
-        self._search_mode = True
-        self._all_fixtures = filtered
-        if not filtered:
-            self.status_text = f"\"{query}\" icin sonuc bulunamadi (son 7 gun - gelecek 60 gun araliginda)."
-        else:
-            self.status_text = f"\"{query}\" icin {len(filtered)} mac bulundu (tum tarihler)."
-        self._render_fixtures(filtered)
 
     @mainthread
     def _on_error(self, message: str):
