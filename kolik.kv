@@ -85,13 +85,13 @@
 
         BoxLayout:
             size_hint_y: None
-            height: dp(42)
+            height: dp(46)
             spacing: dp(6)
 
             Button:
                 text: "<"
                 size_hint_x: None
-                width: dp(44)
+                width: dp(48)
                 background_normal: ""
                 background_color: 0.063, 0.318, 0.235, 1
                 color: 0.831, 0.686, 0.216, 1
@@ -101,7 +101,7 @@
             Label:
                 text: root.date_display
                 color: 0.949, 0.937, 0.902, 1
-                font_size: "13sp"
+                font_size: "14sp"
                 halign: "center"
                 valign: "middle"
                 text_size: self.size
@@ -109,38 +109,23 @@
             Button:
                 text: ">"
                 size_hint_x: None
-                width: dp(44)
+                width: dp(48)
                 background_normal: ""
                 background_color: 0.063, 0.318, 0.235, 1
                 color: 0.831, 0.686, 0.216, 1
                 bold: True
                 on_release: root.shift_date(1)
 
-        BoxLayout:
+        Button:
+            text: "Yenile"
             size_hint_y: None
-            height: dp(42)
-            spacing: dp(8)
-
-            TextInput:
-                id: search_input
-                hint_text: "Takim adiyla ara (orn: Arsenal)"
-                multiline: False
-                background_color: 0.063, 0.318, 0.235, 1
-                foreground_color: 0.949, 0.937, 0.902, 1
-                cursor_color: 0.831, 0.686, 0.216, 1
-                padding: [dp(10), dp(10)]
-                on_text: root.filter_matches(self.text)
-                on_text_validate: root.search_team_wide(self.text)
-
-            Button:
-                text: "Yenile"
-                size_hint_x: None
-                width: dp(90)
-                background_normal: ""
-                background_color: 0.831, 0.686, 0.216, 1
-                color: 0.043, 0.239, 0.180, 1
-                bold: True
-                on_release: root.smart_refresh()
+            height: dp(46)
+            background_normal: ""
+            background_color: 0.831, 0.686, 0.216, 1
+            color: 0.043, 0.239, 0.180, 1
+            bold: True
+            font_size: "14sp"
+            on_release: root.refresh_fixtures()
 
         Label:
             text: root.status_text
