@@ -11,32 +11,24 @@ from kivy.lang import Builder
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
-from kivy.properties import StringProperty, ListProperty, BooleanProperty
+from kivy.properties import StringProperty, BooleanProperty
 from kivy.clock import mainthread
 from kivy.metrics import dp
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 import data_fetcher
-from analyzer import analyze_fixture
+from analyzer import analyze_fixture, evaluate_actual_result
 from market_labels import market_label
 
 KV_FILE = "kolik.kv"
 
-# Varsayılan lig kodu BOŞ = tüm ligler taranır
-DEFAULT_LEAGUE_CODE = ""
+_TR_MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+              "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+_TR_DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
-DATE_RANGE_OPTIONS = ["Bugun", "Bu Hafta (7 gun)", "Bu Ay (30 gun)", "Tum Yaklasanlar"]
 
-
-def _date_range_for_option(option: str):
-    today = datetime.utcnow().date()
-    if option == "Bugun":
-        return today.isoformat(), today.isoformat()
-    if option == "Bu Hafta (7 gun)":
-        return today.isoformat(), (today + timedelta(days=7)).isoformat()
-    if option == "Bu Ay (30 gun)":
-        return today.isoformat(), (today + timedelta(days=30)).isoformat()
-    return None, None
+def _format_date_tr(d: date) -> str:
+    return f"{d.day} {_TR_MONTHS[d.month - 1]} {d.year}  ({_TR_DAYS[d.weekday()]})"
 
 
 class MatchRow(BoxLayout):
@@ -50,22 +42,34 @@ class MatchRow(BoxLayout):
 class BultenScreen(Screen):
     loading = BooleanProperty(False)
     status_text = StringProperty("Bülten yüklemek için 'Yenile' butonuna basın.")
+    date_display = StringProperty("")
 
-    def refresh_fixtures(self, league_code: str = DEFAULT_LEAGUE_CODE, date_option: str = "Bugun"):
+    def on_kv_post(self, base_widget):
+        self.selected_date = datetime.utcnow().date()
+        self.date_display = _format_date_tr(self.selected_date)
+        self._all_fixtures = []
+
+    def shift_date(self, delta_days: int):
+        self.selected_date += timedelta(days=delta_days)
+        self.date_display = _format_date_tr(self.selected_date)
+        self.refresh_fixtures(self.ids.league_input.text.strip())
+
+    def refresh_fixtures(self, league_code: str = ""):
         self.loading = True
         self.status_text = "Bülten yükleniyor..."
+        self.ids.search_input.text = ""
         self.ids.match_list.clear_widgets()
-        date_from, date_to = _date_range_for_option(date_option)
+        date_str = self.selected_date.isoformat()
         threading.Thread(
             target=self._fetch_worker,
-            args=(league_code, date_from, date_to),
+            args=(league_code, date_str, date_str),
             daemon=True,
         ).start()
 
     def _fetch_worker(self, league_code: str, date_from, date_to):
         try:
             fixtures = data_fetcher.fetch_upcoming_fixtures(
-                league_code, limit=40, date_from=date_from, date_to=date_to
+                league_code, limit=60, date_from=date_from, date_to=date_to
             )
             self._on_fixtures_loaded(fixtures)
         except Exception as e:
@@ -77,18 +81,43 @@ class BultenScreen(Screen):
     @mainthread
     def _on_fixtures_loaded(self, fixtures):
         self.loading = False
+        self._all_fixtures = fixtures
         if not fixtures:
-            self.status_text = "Bu filtrede yaklaşan maç bulunamadı."
-            return
-        self.status_text = f"{len(fixtures)} maç bulundu."
+            self.status_text = f"{self.date_display} tarihinde bu filtrede maç bulunamadı."
+        else:
+            self.status_text = f"{len(fixtures)} maç bulundu ({self.date_display})."
+        self._render_fixtures(fixtures)
+
+    def _render_fixtures(self, fixtures):
+        self.ids.match_list.clear_widgets()
         for fx in fixtures:
+            is_finished = fx.get("status") == "FINISHED"
+            if is_finished and fx.get("home_goals") is not None:
+                second_line = f"{fx.get('league','')}  |  Sonuc: {fx['home_goals']}-{fx['away_goals']} (Bitti)"
+            else:
+                second_line = f"{fx.get('league','')}  |  {fx.get('utc_date','')[:16].replace('T',' ')}"
+
             row = MatchRow(
                 home_team=fx["home"], away_team=fx["away"],
-                league=fx.get("league", ""), kickoff=fx.get("utc_date", "")[:16].replace("T", " ")
+                league=second_line, kickoff=""
             )
             row.raw_fixture = fx
+            row.ids.select_btn.text = "Sonucu Gor" if is_finished else "Analiz Et"
             row.ids.select_btn.bind(on_release=lambda inst, f=fx: self.go_to_analysis(f))
             self.ids.match_list.add_widget(row)
+
+    def filter_matches(self, query: str):
+        query = (query or "").strip().lower()
+        if not query:
+            filtered = self._all_fixtures
+        else:
+            filtered = [
+                fx for fx in self._all_fixtures
+                if query in fx["home"].lower() or query in fx["away"].lower()
+            ]
+        self._render_fixtures(filtered)
+        if query:
+            self.status_text = f"{len(filtered)} sonuç bulundu (\"{query}\" için)."
 
     @mainthread
     def _on_error(self, message: str):
@@ -113,13 +142,14 @@ class AnalizScreen(Screen):
         self.loading = True
         self.status_text = "Takım formu, H2H ve hava durumu verileri toplanıyor..."
         self.ids.results_box.clear_widgets()
+        self._raw_fixture = raw_fixture
         threading.Thread(target=self._analyze_worker, args=(raw_fixture,), daemon=True).start()
 
     def _analyze_worker(self, raw_fixture: dict):
         try:
             fixture = data_fetcher.build_fixture(raw_fixture)
             result = analyze_fixture(fixture)
-            self._on_analysis_done(result)
+            self._on_analysis_done(result, raw_fixture)
         except Exception as e:
             import traceback
             from kivy.logger import Logger
@@ -127,10 +157,32 @@ class AnalizScreen(Screen):
             self._on_error(str(e))
 
     @mainthread
-    def _on_analysis_done(self, result):
+    def _on_analysis_done(self, result, raw_fixture):
         self.loading = False
         self.status_text = ""
         box = self.ids.results_box
+
+        is_finished = raw_fixture.get("status") == "FINISHED" and raw_fixture.get("home_goals") is not None
+        hit_markets = set()
+        if is_finished:
+            hit_markets = evaluate_actual_result(
+                raw_fixture["home_goals"], raw_fixture["away_goals"],
+                raw_fixture.get("ht_home_goals"), raw_fixture.get("ht_away_goals"),
+            )
+            score_lbl = Label(
+                text=f"GERCEKLESEN SONUC: {self.home_team} {raw_fixture['home_goals']} - {raw_fixture['away_goals']} {self.away_team}",
+                bold=True, size_hint_y=None, height=dp(40),
+                color=(0.13, 0.75, 0.45, 1), halign="center", valign="middle"
+            )
+            score_lbl.text_size = (box.width, None)
+            box.add_widget(score_lbl)
+            hint_lbl = Label(
+                text="Yesil + isaretli satirlar gercekte TUTAN tahminlerdir.",
+                size_hint_y=None, height=dp(24), font_size="11sp",
+                color=(0.831, 0.686, 0.216, 0.8), halign="center", valign="middle"
+            )
+            hint_lbl.text_size = (box.width, None)
+            box.add_widget(hint_lbl)
 
         eg = result.expected_goals
         box.add_widget(self._section_title(
@@ -139,12 +191,12 @@ class AnalizScreen(Screen):
 
         box.add_widget(self._section_title("İSTATİSTİKSEL OLARAK ÖNE ÇIKAN SEÇİMLER"))
         for pick in result.top_picks:
-            box.add_widget(self._pick_row(market_label(pick["market"]), pick["probability"]))
+            box.add_widget(self._pick_row(pick["market"], pick["probability"], pick["market"] in hit_markets))
 
         box.add_widget(self._section_title("DÜŞÜK OLASILIKLI SÜRPRİZ SENARYOLAR"))
         if result.surprise_picks:
             for pick in result.surprise_picks:
-                box.add_widget(self._pick_row(market_label(pick["market"]), pick["probability"]))
+                box.add_widget(self._pick_row(pick["market"], pick["probability"], pick["market"] in hit_markets))
         else:
             lbl = Label(text="Bu maç için belirgin bir sürpriz senaryo bulunamadı.",
                         size_hint_y=None, height=dp(30), halign="center")
@@ -153,7 +205,7 @@ class AnalizScreen(Screen):
 
         box.add_widget(self._section_title("TÜM PAZARLAR (Detaylı Olasılık Tablosu)"))
         for market, prob in sorted(result.probabilities.items()):
-            box.add_widget(self._pick_row(market_label(market), prob, small=True))
+            box.add_widget(self._pick_row(market, prob, market in hit_markets, small=True))
 
         note_label = Label(
             text=result.confidence_note,
@@ -174,15 +226,22 @@ class AnalizScreen(Screen):
         lbl.text_size = (self.ids.results_box.width, None)
         return lbl
 
-    def _pick_row(self, market, prob, small=False):
+    def _pick_row(self, market_code, prob, hit=False, small=False):
         row = BoxLayout(size_hint_y=None, height=dp(30 if small else 40),
                          padding=[dp(4), 0])
-        market_lbl = Label(text=market, halign="left", valign="middle",
-                            color=(0.9, 0.9, 0.9, 1), font_size="11sp" if small else "13sp")
+        label_text = market_label(market_code)
+        if hit:
+            label_text = "✓ " + label_text
+        market_color = (0.20, 0.85, 0.45, 1) if hit else (0.9, 0.9, 0.9, 1)
+        market_lbl = Label(text=label_text, halign="left", valign="middle",
+                            color=market_color, bold=hit,
+                            font_size="11sp" if small else "13sp")
         market_lbl.text_size = (self.ids.results_box.width * 0.68, None)
         row.add_widget(market_lbl)
-        row.add_widget(Label(text=f"%{prob}", halign="right", bold=not small,
-                              color=(0.13, 0.55, 0.36, 1)))
+
+        prob_color = (0.20, 0.85, 0.45, 1) if hit else (0.13, 0.55, 0.36, 1)
+        row.add_widget(Label(text=f"%{prob}", halign="right", bold=(not small) or hit,
+                              color=prob_color))
         return row
 
 
