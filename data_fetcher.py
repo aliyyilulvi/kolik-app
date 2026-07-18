@@ -16,9 +16,9 @@ AĞ / DNS NOTU: Sistem DNS çözümleyicisi bazı cihazlarda bozuk olabiliyor.
 Sırasıyla 3 yedek yöntem deneniyor: Android native (pyjnius), DNS-over-TCP,
 Cloudflare DoH.
 
-v1.3 NOTU: fetch_upcoming_fixtures artık status filtresi UYGULAMIYOR -
-hem planlanan hem bitmiş maçlar birlikte dönüyor (skor bilgisiyle),
-böylece geçmiş maçların sonucunu görme özelliği çalışabiliyor.
+v1.4 NOTU: fetch_upcoming_fixtures artık HER LİGİ AYRI AYRI, kanıtlanmış
+çalışan /v4/competitions/{code}/matches uç noktasıyla sorguluyor (genel
+/v4/matches uç noktası geniş tarih aralıklarında 400 hatası veriyordu).
 """
 
 import os
@@ -26,6 +26,7 @@ import csv
 import socket
 import struct
 import random
+import time
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -183,59 +184,68 @@ def _headers() -> dict:
     return {"X-Auth-Token": _api_key()}
 
 
+FREE_COMPETITIONS = ["PL", "PD", "BL1", "SA", "FL1", "CL", "ELC", "DED", "PPL", "BSA", "WC", "EC"]
+
+
 # ----------------------------------------------------------------------
 # 1) FİKSTÜR (Bülten) ÇEKME
 # ----------------------------------------------------------------------
-def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 60,
+def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 80,
                              date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[dict]:
     """
-    Belirtilen tarih aralığındaki maçları döndürür (competition_code BOŞ
-    ise TÜM liglerde). status FİLTRESİ YOK - hem planlanan (SCHEDULED)
-    hem bitmiş (FINISHED) maçlar birlikte gelir; UI tarafı 'status'
-    alanına bakarak ayırt eder. FINISHED maçlar için skor bilgisi de
-    (home_goals, away_goals, ht_home_goals, ht_away_goals) döner.
+    Her ligi AYRI AYRI, kanıtlanmış çalışan /v4/competitions/{code}/matches
+    uç noktasıyla sorgular. competition_code boşsa TÜM ücretsiz 12 lig taranır.
     """
     code = (competition_code or "").strip().upper()
-    if code and code != "ALL":
-        url = f"{FOOTBALL_DATA_BASE}/competitions/{code}/matches"
-    else:
-        url = f"{FOOTBALL_DATA_BASE}/matches"
+    codes = [code] if code else FREE_COMPETITIONS
 
-    if not date_from and not date_to:
-        today = datetime.utcnow().date()
-        date_from = today.isoformat()
-        date_to = today.isoformat()
+    all_fixtures = []
+    for comp_code in codes:
+        try:
+            url = f"{FOOTBALL_DATA_BASE}/competitions/{comp_code}/matches"
+            params = {}
+            if date_from:
+                params["dateFrom"] = date_from
+            if date_to:
+                params["dateTo"] = date_to
 
-    params = {}
-    if date_from:
-        params["dateFrom"] = date_from
-    if date_to:
-        params["dateTo"] = date_to
+            resp = requests.get(url, headers=_headers(), params=params, timeout=15)
 
-    resp = requests.get(url, headers=_headers(), params=params, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
+            if resp.status_code == 429:
+                time.sleep(6)
+                resp = requests.get(url, headers=_headers(), params=params, timeout=15)
 
-    fixtures = []
-    for m in data.get("matches", [])[:limit]:
-        comp_name = m.get("competition", {}).get("name") or data.get("competition", {}).get("name", code or "Tüm Ligler")
-        status = m.get("status", "SCHEDULED")
-        full_time = (m.get("score") or {}).get("fullTime") or {}
-        half_time = (m.get("score") or {}).get("halfTime") or {}
-        fixtures.append({
-            "home": m["homeTeam"]["name"],
-            "away": m["awayTeam"]["name"],
-            "home_id": m["homeTeam"]["id"],
-            "away_id": m["awayTeam"]["id"],
-            "utc_date": m["utcDate"],
-            "league": comp_name,
-            "status": status,
-            "home_goals": full_time.get("home"),
-            "away_goals": full_time.get("away"),
-            "ht_home_goals": half_time.get("home"),
-            "ht_away_goals": half_time.get("away"),
-        })
-    return fixtures
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            comp_name = data.get("competition", {}).get("name", comp_code)
+
+            for m in data.get("matches", []):
+                status = m.get("status", "SCHEDULED")
+                full_time = (m.get("score") or {}).get("fullTime") or {}
+                half_time = (m.get("score") or {}).get("halfTime") or {}
+                all_fixtures.append({
+                    "home": m["homeTeam"]["name"],
+                    "away": m["awayTeam"]["name"],
+                    "home_id": m["homeTeam"]["id"],
+                    "away_id": m["awayTeam"]["id"],
+                    "utc_date": m["utcDate"],
+                    "league": comp_name,
+                    "status": status,
+                    "home_goals": full_time.get("home"),
+                    "away_goals": full_time.get("away"),
+                    "ht_home_goals": half_time.get("home"),
+                    "ht_away_goals": half_time.get("away"),
+                })
+
+            time.sleep(0.3)
+
+        except Exception:
+            continue
+
+    all_fixtures.sort(key=lambda fx: fx["utc_date"])
+    return all_fixtures[:limit]
 
 
 # ----------------------------------------------------------------------
