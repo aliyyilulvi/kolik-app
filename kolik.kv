@@ -1,56 +1,9 @@
 #:kivy 2.2.1
 # ---------------------------------------------------------------------
 # kolik.kv - Koyu Zümrüt Yeşili + Altın Sarısı tema
+# NOT: MatchRow artık burada tanımlı DEĞİL - main.py'de Python ile
+# inşa ediliyor (çift render sorununu önlemek için).
 # ---------------------------------------------------------------------
-
-<MatchRow>:
-    orientation: "horizontal"
-    size_hint_y: None
-    height: dp(78)
-    padding: dp(10)
-    spacing: dp(8)
-    canvas.before:
-        Color:
-            rgba: 0.063, 0.318, 0.235, 1
-        RoundedRectangle:
-            pos: self.pos
-            size: self.size
-            radius: [10]
-
-    BoxLayout:
-        orientation: "vertical"
-        Label:
-            text: root.home_team + " vs " + root.away_team
-            color: 0.949, 0.937, 0.902, 1
-            bold: True
-            halign: "left"
-            valign: "middle"
-            text_size: self.width, None
-            shorten: True
-            shorten_from: "right"
-            max_lines: 2
-            font_size: "15sp"
-        Label:
-            text: root.league + "  |  " + root.kickoff
-            color: 0.831, 0.686, 0.216, 0.85
-            font_size: "11sp"
-            halign: "left"
-            valign: "middle"
-            text_size: self.width, None
-            shorten: True
-            shorten_from: "right"
-
-    Button:
-        id: select_btn
-        text: "Analiz Et"
-        size_hint_x: None
-        width: dp(100)
-        background_normal: ""
-        background_color: 0.831, 0.686, 0.216, 1
-        color: 0.043, 0.239, 0.180, 1
-        bold: True
-        font_size: "12sp"
-
 
 <KolikScreenManager>:
 
