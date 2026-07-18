@@ -11,6 +11,8 @@ from kivy.lang import Builder
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.graphics import Color, RoundedRectangle
 from kivy.properties import StringProperty, BooleanProperty
 from kivy.clock import mainthread
 from kivy.metrics import dp
@@ -32,11 +34,82 @@ def _format_date_tr(d: date) -> str:
 
 
 class MatchRow(BoxLayout):
+    """
+    ÖNEMLİ: Bu widget artık kolik.kv'deki bir <MatchRow>: kuralına
+    DAYANMIYOR - tüm alt widget'lar burada, Python'da elle inşa
+    ediliyor. Bu, kv kuralının olası çift uygulanması (bazı Android
+    yaşam döngüsü durumlarında görülen bilinen bir Kivy sorunu)
+    yüzünden içeriğin iki kez çizilmesini önler.
+    """
     home_team = StringProperty("")
     away_team = StringProperty("")
     league = StringProperty("")
     kickoff = StringProperty("")
     raw_fixture = None
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = "horizontal"
+        self.size_hint_y = None
+        self.height = dp(78)
+        self.padding = dp(10)
+        self.spacing = dp(8)
+
+        with self.canvas.before:
+            Color(0.063, 0.318, 0.235, 1)
+            self._bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[10])
+        self.bind(pos=self._update_bg, size=self._update_bg)
+
+        text_box = BoxLayout(orientation="vertical")
+
+        self._title_label = Label(
+            text=self.home_team + " vs " + self.away_team,
+            color=(0.949, 0.937, 0.902, 1), bold=True,
+            halign="left", valign="middle",
+            shorten=True, shorten_from="right", max_lines=2,
+            font_size="15sp",
+        )
+        self._title_label.bind(size=self._sync_title_text_size)
+        text_box.add_widget(self._title_label)
+
+        self._sub_label = Label(
+            text=self.league + "  |  " + self.kickoff,
+            color=(0.831, 0.686, 0.216, 0.85), font_size="11sp",
+            halign="left", valign="middle",
+            shorten=True, shorten_from="right",
+        )
+        self._sub_label.bind(size=self._sync_sub_text_size)
+        text_box.add_widget(self._sub_label)
+
+        self.add_widget(text_box)
+
+        self.select_btn = Button(
+            text="Analiz Et", size_hint_x=None, width=dp(100),
+            background_normal="", background_color=(0.831, 0.686, 0.216, 1),
+            color=(0.043, 0.239, 0.180, 1), bold=True, font_size="12sp",
+        )
+        self.add_widget(self.select_btn)
+
+        self.bind(
+            home_team=self._refresh_title, away_team=self._refresh_title,
+            league=self._refresh_sub, kickoff=self._refresh_sub,
+        )
+
+    def _update_bg(self, *args):
+        self._bg_rect.pos = self.pos
+        self._bg_rect.size = self.size
+
+    def _sync_title_text_size(self, instance, value):
+        instance.text_size = (value[0], None)
+
+    def _sync_sub_text_size(self, instance, value):
+        instance.text_size = (value[0], None)
+
+    def _refresh_title(self, *args):
+        self._title_label.text = self.home_team + " vs " + self.away_team
+
+    def _refresh_sub(self, *args):
+        self._sub_label.text = self.league + "  |  " + self.kickoff
 
 
 class BultenScreen(Screen):
@@ -101,8 +174,8 @@ class BultenScreen(Screen):
                 league=second_line, kickoff=""
             )
             row.raw_fixture = fx
-            row.ids.select_btn.text = "Sonucu Gor" if is_finished else "Analiz Et"
-            row.ids.select_btn.bind(on_release=lambda inst, f=fx: self.go_to_analysis(f))
+            row.select_btn.text = "Sonucu Gor" if is_finished else "Analiz Et"
+            row.select_btn.bind(on_release=lambda inst, f=fx: self.go_to_analysis(f))
             self.ids.match_list.add_widget(row)
 
     @mainthread
