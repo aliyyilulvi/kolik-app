@@ -4,11 +4,10 @@ data_fetcher.py
 ----------------
 Kolik uygulamasının veri toplama katmanı.
 
-v1.5 NOTU: Tüm football-data.org isteklerinde artık ORTAK bir "429 (rate
-limit) olursa bekle ve tekrar dene" mekanizması var (_get_with_retry).
-Bülten yüklerken 12 lig sorgulandığı için, hemen ardından analiz ekranı
-açılırken rate limit'e takılma ihtimali yüksekti - artık otomatik bekleyip
-tekrar deniyor.
+v1.6 NOTU: fetch_upcoming_fixtures artık 12 ligi PARALEL (aynı anda,
+en fazla 6 istek birlikte) sorguluyor - önceki sıralı (12 ayrı ayrı,
+aralarında bekleme ile) yönteme göre çok daha hızlı. Rate limit (429)
+durumunda otomatik bekleyip tekrar deniyor.
 """
 
 import os
@@ -19,6 +18,7 @@ import random
 import time
 from datetime import datetime, timedelta
 from typing import List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 import urllib3.util.connection as _urllib3_cn
@@ -175,12 +175,7 @@ def _headers() -> dict:
 
 
 def _get_with_retry(url: str, params: dict = None, max_retries: int = 3, timeout: float = 15) -> requests.Response:
-    """
-    football-data.org'a GET isteği atar. 429 (rate limit) alırsa,
-    API'nin verdiği 'Retry-After' süresini (yoksa 8 saniye) bekleyip
-    tekrar dener. Ücretsiz plan dakikada 10 istekle sınırlı olduğu için
-    bülten (12 lig) + analiz (birkaç istek) art arda gelince gerekiyor.
-    """
+    """429 (rate limit) alırsa API'nin verdiği süreyi (yoksa 8sn) bekleyip tekrar dener."""
     last_resp = None
     for attempt in range(max_retries):
         resp = requests.get(url, headers=_headers(), params=params, timeout=timeout)
@@ -195,53 +190,70 @@ def _get_with_retry(url: str, params: dict = None, max_retries: int = 3, timeout
 FREE_COMPETITIONS = ["PL", "PD", "BL1", "SA", "FL1", "CL", "ELC", "DED", "PPL", "BSA", "WC", "EC"]
 
 
+def _fetch_one_competition(comp_code: str, date_from: Optional[str], date_to: Optional[str]) -> List[dict]:
+    try:
+        url = f"{FOOTBALL_DATA_BASE}/competitions/{comp_code}/matches"
+        params = {}
+        if date_from:
+            params["dateFrom"] = date_from
+        if date_to:
+            params["dateTo"] = date_to
+
+        resp = _get_with_retry(url, params)
+        if resp is None or resp.status_code != 200:
+            return []
+
+        data = resp.json()
+        comp_name = data.get("competition", {}).get("name", comp_code)
+
+        results = []
+        for m in data.get("matches", []):
+            status = m.get("status", "SCHEDULED")
+            full_time = (m.get("score") or {}).get("fullTime") or {}
+            half_time = (m.get("score") or {}).get("halfTime") or {}
+            results.append({
+                "home": m["homeTeam"]["name"],
+                "away": m["awayTeam"]["name"],
+                "home_id": m["homeTeam"]["id"],
+                "away_id": m["awayTeam"]["id"],
+                "utc_date": m["utcDate"],
+                "league": comp_name,
+                "status": status,
+                "home_goals": full_time.get("home"),
+                "away_goals": full_time.get("away"),
+                "ht_home_goals": half_time.get("home"),
+                "ht_away_goals": half_time.get("away"),
+            })
+        return results
+    except Exception:
+        return []
+
+
 # ----------------------------------------------------------------------
-# 1) FİKSTÜR (Bülten) ÇEKME
+# 1) FİKSTÜR (Bülten) ÇEKME - PARALEL
 # ----------------------------------------------------------------------
 def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 80,
                              date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[dict]:
+    """
+    Ligleri AYNI ANDA (en fazla 6 tanesi paralel) sorgular - sıralı
+    yönteme göre çok daha hızlıdır. competition_code boşsa TÜM ücretsiz
+    12 lig taranır.
+    """
     code = (competition_code or "").strip().upper()
     codes = [code] if code else FREE_COMPETITIONS
 
     all_fixtures = []
-    for comp_code in codes:
-        try:
-            url = f"{FOOTBALL_DATA_BASE}/competitions/{comp_code}/matches"
-            params = {}
-            if date_from:
-                params["dateFrom"] = date_from
-            if date_to:
-                params["dateTo"] = date_to
-
-            resp = _get_with_retry(url, params)
-            if resp is None or resp.status_code != 200:
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_map = {
+            executor.submit(_fetch_one_competition, c, date_from, date_to): c
+            for c in codes
+        }
+        for future in as_completed(future_map):
+            try:
+                result = future.result()
+                all_fixtures.extend(result)
+            except Exception:
                 continue
-
-            data = resp.json()
-            comp_name = data.get("competition", {}).get("name", comp_code)
-
-            for m in data.get("matches", []):
-                status = m.get("status", "SCHEDULED")
-                full_time = (m.get("score") or {}).get("fullTime") or {}
-                half_time = (m.get("score") or {}).get("halfTime") or {}
-                all_fixtures.append({
-                    "home": m["homeTeam"]["name"],
-                    "away": m["awayTeam"]["name"],
-                    "home_id": m["homeTeam"]["id"],
-                    "away_id": m["awayTeam"]["id"],
-                    "utc_date": m["utcDate"],
-                    "league": comp_name,
-                    "status": status,
-                    "home_goals": full_time.get("home"),
-                    "away_goals": full_time.get("away"),
-                    "ht_home_goals": half_time.get("home"),
-                    "ht_away_goals": half_time.get("away"),
-                })
-
-            time.sleep(0.3)
-
-        except Exception:
-            continue
 
     all_fixtures.sort(key=lambda fx: fx["utc_date"])
     return all_fixtures[:limit]
