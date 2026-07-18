@@ -4,21 +4,11 @@ data_fetcher.py
 ----------------
 Kolik uygulamasının veri toplama katmanı.
 
-ÖNEMLİ TASARIM KARARI:
-Bu modül KESİNLİKLE bahis sitelerinden veri scrape etmez.
-  1) Fikstür + geçmiş maç sonuçları  -> football-data.org REST API'si
-  2) Hava durumu                     -> Open-Meteo API (anahtar gerekmez)
-  3) Kadro piyasa değeri             -> data/market_values.csv (manuel, opsiyonel)
-
-API ANAHTARI: Mobilde ortam değişkeni çalışmadığı için _HARDCODED_API_KEY'e gömülüdür.
-
-AĞ / DNS NOTU: Sistem DNS çözümleyicisi bazı cihazlarda bozuk olabiliyor.
-Sırasıyla 3 yedek yöntem deneniyor: Android native (pyjnius), DNS-over-TCP,
-Cloudflare DoH.
-
-v1.4 NOTU: fetch_upcoming_fixtures artık HER LİGİ AYRI AYRI, kanıtlanmış
-çalışan /v4/competitions/{code}/matches uç noktasıyla sorguluyor (genel
-/v4/matches uç noktası geniş tarih aralıklarında 400 hatası veriyordu).
+v1.5 NOTU: Tüm football-data.org isteklerinde artık ORTAK bir "429 (rate
+limit) olursa bekle ve tekrar dene" mekanizması var (_get_with_retry).
+Bülten yüklerken 12 lig sorgulandığı için, hemen ardından analiz ekranı
+açılırken rate limit'e takılma ihtimali yüksekti - artık otomatik bekleyip
+tekrar deniyor.
 """
 
 import os
@@ -184,6 +174,24 @@ def _headers() -> dict:
     return {"X-Auth-Token": _api_key()}
 
 
+def _get_with_retry(url: str, params: dict = None, max_retries: int = 3, timeout: float = 15) -> requests.Response:
+    """
+    football-data.org'a GET isteği atar. 429 (rate limit) alırsa,
+    API'nin verdiği 'Retry-After' süresini (yoksa 8 saniye) bekleyip
+    tekrar dener. Ücretsiz plan dakikada 10 istekle sınırlı olduğu için
+    bülten (12 lig) + analiz (birkaç istek) art arda gelince gerekiyor.
+    """
+    last_resp = None
+    for attempt in range(max_retries):
+        resp = requests.get(url, headers=_headers(), params=params, timeout=timeout)
+        if resp.status_code != 429:
+            return resp
+        last_resp = resp
+        wait = int(resp.headers.get("Retry-After", 8))
+        time.sleep(max(wait, 3))
+    return last_resp
+
+
 FREE_COMPETITIONS = ["PL", "PD", "BL1", "SA", "FL1", "CL", "ELC", "DED", "PPL", "BSA", "WC", "EC"]
 
 
@@ -192,10 +200,6 @@ FREE_COMPETITIONS = ["PL", "PD", "BL1", "SA", "FL1", "CL", "ELC", "DED", "PPL", 
 # ----------------------------------------------------------------------
 def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 80,
                              date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[dict]:
-    """
-    Her ligi AYRI AYRI, kanıtlanmış çalışan /v4/competitions/{code}/matches
-    uç noktasıyla sorgular. competition_code boşsa TÜM ücretsiz 12 lig taranır.
-    """
     code = (competition_code or "").strip().upper()
     codes = [code] if code else FREE_COMPETITIONS
 
@@ -209,13 +213,8 @@ def fetch_upcoming_fixtures(competition_code: str = "", limit: int = 80,
             if date_to:
                 params["dateTo"] = date_to
 
-            resp = requests.get(url, headers=_headers(), params=params, timeout=15)
-
-            if resp.status_code == 429:
-                time.sleep(6)
-                resp = requests.get(url, headers=_headers(), params=params, timeout=15)
-
-            if resp.status_code != 200:
+            resp = _get_with_retry(url, params)
+            if resp is None or resp.status_code != 200:
                 continue
 
             data = resp.json()
@@ -258,8 +257,9 @@ def fetch_team_recent_matches(team_id: int, limit: int = 10) -> List[MatchResult
 
     url = f"{FOOTBALL_DATA_BASE}/teams/{team_id}/matches"
     params = {"status": "FINISHED", "dateFrom": date_from, "dateTo": date_to}
-    resp = requests.get(url, headers=_headers(), params=params, timeout=15)
-    resp.raise_for_status()
+    resp = _get_with_retry(url, params)
+    if resp is None or resp.status_code != 200:
+        return []
     data = resp.json()
 
     matches_raw = data.get("matches", [])
@@ -294,8 +294,9 @@ def build_team_stats(team_name: str, team_id: int) -> TeamStats:
 def fetch_head_to_head(match_id: int, limit: int = 5) -> HeadToHead:
     url = f"{FOOTBALL_DATA_BASE}/matches/{match_id}/head2head"
     params = {"limit": limit}
-    resp = requests.get(url, headers=_headers(), params=params, timeout=15)
-    resp.raise_for_status()
+    resp = _get_with_retry(url, params)
+    if resp is None or resp.status_code != 200:
+        return HeadToHead(matches=[])
     data = resp.json()
 
     matches = []
