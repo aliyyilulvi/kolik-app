@@ -66,26 +66,26 @@
     BoxLayout:
         orientation: "vertical"
         padding: dp(14)
-        spacing: dp(10)
+        spacing: dp(8)
 
         Label:
             text: "KOLIK"
-            font_size: "30sp"
+            font_size: "28sp"
             bold: True
             color: 0.831, 0.686, 0.216, 1
             size_hint_y: None
-            height: dp(48)
+            height: dp(42)
 
         Label:
             text: "Istatistiksel Mac Analiz Motoru (Poisson Modeli)"
-            font_size: "13sp"
+            font_size: "12sp"
             color: 0.949, 0.937, 0.902, 0.75
             size_hint_y: None
-            height: dp(22)
+            height: dp(20)
 
         BoxLayout:
             size_hint_y: None
-            height: dp(44)
+            height: dp(42)
             spacing: dp(8)
 
             TextInput:
@@ -101,41 +101,62 @@
             Button:
                 text: "Yenile"
                 size_hint_x: None
-                width: dp(100)
+                width: dp(90)
                 background_normal: ""
                 background_color: 0.831, 0.686, 0.216, 1
                 color: 0.043, 0.239, 0.180, 1
                 bold: True
-                on_release: root.refresh_fixtures(league_input.text.strip(), date_spinner.text)
+                on_release: root.refresh_fixtures(league_input.text.strip())
 
         BoxLayout:
             size_hint_y: None
-            height: dp(40)
-            spacing: dp(8)
+            height: dp(42)
+            spacing: dp(6)
 
-            Label:
-                text: "Tarih araligi:"
-                color: 0.949, 0.937, 0.902, 0.8
-                font_size: "12sp"
+            Button:
+                text: "<"
                 size_hint_x: None
-                width: dp(100)
-                halign: "left"
-                text_size: self.size
-                valign: "middle"
-
-            Spinner:
-                id: date_spinner
-                text: "Bugun"
-                values: ["Bugun", "Bu Hafta (7 gun)", "Bu Ay (30 gun)", "Tum Yaklasanlar"]
+                width: dp(44)
                 background_normal: ""
                 background_color: 0.063, 0.318, 0.235, 1
+                color: 0.831, 0.686, 0.216, 1
+                bold: True
+                on_release: root.shift_date(-1)
+
+            Label:
+                text: root.date_display
                 color: 0.949, 0.937, 0.902, 1
-                font_size: "12sp"
+                font_size: "13sp"
+                halign: "center"
+                valign: "middle"
+                text_size: self.size
+
+            Button:
+                text: ">"
+                size_hint_x: None
+                width: dp(44)
+                background_normal: ""
+                background_color: 0.063, 0.318, 0.235, 1
+                color: 0.831, 0.686, 0.216, 1
+                bold: True
+                on_release: root.shift_date(1)
+
+        TextInput:
+            id: search_input
+            hint_text: "Takim adiyla ara (orn: Arsenal)"
+            multiline: False
+            size_hint_y: None
+            height: dp(38)
+            background_color: 0.063, 0.318, 0.235, 1
+            foreground_color: 0.949, 0.937, 0.902, 1
+            cursor_color: 0.831, 0.686, 0.216, 1
+            padding: [dp(10), dp(8)]
+            on_text: root.filter_matches(self.text)
 
         Label:
             text: root.status_text
             size_hint_y: None
-            height: max(dp(26), self.texture_size[1] + dp(10))
+            height: max(dp(24), self.texture_size[1] + dp(8))
             color: 0.831, 0.686, 0.216, 1
             font_size: "12sp"
             halign: "left"
@@ -155,8 +176,8 @@
         Label:
             text: "Uyari: Bu uygulama bahis sitelerinden veri cekmez. Tum tahminler istatistiksel olasiliktir, garanti degildir."
             size_hint_y: None
-            height: dp(40)
-            font_size: "10sp"
+            height: dp(36)
+            font_size: "9sp"
             color: 0.949, 0.937, 0.902, 0.55
             halign: "center"
             text_size: self.width, None
