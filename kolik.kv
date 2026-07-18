@@ -123,7 +123,7 @@
 
             TextInput:
                 id: search_input
-                hint_text: "Takim adiyla ara (orn: Arsenal) - Enter'a basin"
+                hint_text: "Takim adiyla ara (orn: Arsenal)"
                 multiline: False
                 background_color: 0.063, 0.318, 0.235, 1
                 foreground_color: 0.949, 0.937, 0.902, 1
@@ -140,7 +140,7 @@
                 background_color: 0.831, 0.686, 0.216, 1
                 color: 0.043, 0.239, 0.180, 1
                 bold: True
-                on_release: root.refresh_fixtures()
+                on_release: root.smart_refresh()
 
         Label:
             text: root.status_text
